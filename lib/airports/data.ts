@@ -24,11 +24,6 @@ export interface AirportPlace {
   cityId?: string;
   /** 검색용 키워드 */
   keywords: string[];
-  /**
-   * cities 검색에서 공항 키워드로 부모 도시를 찾았을 때 해당 공항 코드.
-   * 정적 데이터에는 두지 않고 검색 결과에서만 채운다.
-   */
-  matchedCode?: string;
 }
 
 export const CONTINENT_LABELS: Record<ContinentId, string> = {
@@ -40,6 +35,16 @@ export const CONTINENT_LABELS: Record<ContinentId, string> = {
   "middle-east": "중동",
   other: "기타",
 };
+
+const CONTINENT_ORDER: ContinentId[] = [
+  "east-asia",
+  "southeast-asia",
+  "europe",
+  "americas",
+  "oceania",
+  "middle-east",
+  "other",
+];
 
 const COUNTRY_TO_CONTINENT: Record<string, ContinentId> = {
   대한민국: "east-asia",
@@ -65,6 +70,27 @@ const COUNTRY_TO_CONTINENT: Record<string, ContinentId> = {
 
 export function getContinentId(place: AirportPlace): ContinentId {
   return COUNTRY_TO_CONTINENT[place.country] ?? "other";
+}
+
+export function groupPlacesByContinent(
+  places: AirportPlace[]
+): Array<{ id: ContinentId; label: string; places: AirportPlace[] }> {
+  const buckets = new Map<ContinentId, AirportPlace[]>();
+
+  for (const place of places) {
+    const id = getContinentId(place);
+    const list = buckets.get(id);
+    if (list) list.push(place);
+    else buckets.set(id, [place]);
+  }
+
+  return CONTINENT_ORDER.filter((id) => (buckets.get(id)?.length ?? 0) > 0).map(
+    (id) => ({
+      id,
+      label: CONTINENT_LABELS[id],
+      places: buckets.get(id) ?? [],
+    })
+  );
 }
 
 export const AIRPORT_PLACES: AirportPlace[] = [
@@ -856,7 +882,7 @@ export function searchAirportPlaces(query: string, limit = 24): AirportPlace[] {
 }
 
 /** 항공권 검색 입력란 표시 (예: 인천국제공항(ICN)) */
-function formatAirportInputLabel(place: AirportPlace): string {
+export function formatAirportInputLabel(place: AirportPlace): string {
   if (place.kind === "city") {
     return `${place.city}(전체)`;
   }
@@ -900,6 +926,27 @@ export function findAirportPlaceByQuery(query: string): AirportPlace | null {
   );
 }
 
+export function formatAirportKeyword(keyword: string): string {
+  const place = findAirportPlaceByQuery(keyword);
+  return place ? formatAirportInputLabel(place) : keyword;
+}
+
+/** 표시 라벨 — 도시 선택 시 "(모두)"·공항코드 없이 도시명 */
+export function formatPlaceLabel(place: AirportPlace): string {
+  if (place.kind === "city") return place.city;
+  return place.code ? `${place.city} (${place.code})` : place.name;
+}
+
+/** 온보딩/일정용: 도시 · 나라 (공항코드 없음) */
+export function formatCityCountryLabel(place: AirportPlace): string {
+  if (place.country) return `${place.city}, ${place.country}`;
+  return place.city || place.name;
+}
+
+export function formatDestinationForPlan(place: AirportPlace): string {
+  return formatCityCountryLabel(place);
+}
+
 /** 인기 도시만 (공항코드 항목 제외) */
 export function getPopularCities(limit = 24): AirportPlace[] {
   const cities: AirportPlace[] = [];
@@ -921,54 +968,17 @@ export function getPopularCities(limit = 24): AirportPlace[] {
   return cities;
 }
 
-/**
- * 도시만 검색. 공항 키워드(icn·인천·김포 등)가 맞으면 부모 도시를
- * matchedCode와 함께 반환한다. 나라 항목은 로컬 폴백에 없다.
- */
+/** 도시만 검색 (공항·IATA 목록 제외) */
 export function searchCityPlaces(query: string, limit = 24): AirportPlace[] {
   const q = normalize(query);
   if (!q) return getPopularCities(limit);
 
-  const result: AirportPlace[] = [];
-  const seen = new Set<string>();
-
-  for (const place of AIRPORT_PLACES) {
-    if (place.kind !== "city") continue;
+  const cities = AIRPORT_PLACES.filter((place) => place.kind === "city");
+  const matched = cities.filter((place) => {
     const hay = [place.name, place.city, place.country, ...place.keywords]
       .join(" ")
       .toLowerCase();
-    if (!hay.includes(q)) continue;
-    result.push(place);
-    seen.add(place.id);
-    if (result.length >= limit) return result;
-  }
-
-  for (const airport of AIRPORT_PLACES) {
-    if (airport.kind !== "airport" || !airport.cityId) continue;
-    if (seen.has(airport.cityId)) continue;
-    const hay = [
-      airport.name,
-      airport.city,
-      airport.country,
-      airport.code ?? "",
-      formatAirportInputLabel(airport),
-      ...(airport.code ? [AIRPORT_OFFICIAL_NAMES[airport.code] ?? ""] : []),
-      ...airport.keywords,
-    ]
-      .join(" ")
-      .toLowerCase();
-    if (!hay.includes(q)) continue;
-    const parent = AIRPORT_PLACES.find(
-      (p) => p.kind === "city" && p.id === airport.cityId
-    );
-    if (!parent) continue;
-    result.push({
-      ...parent,
-      matchedCode: airport.code,
-    });
-    seen.add(parent.id);
-    if (result.length >= limit) break;
-  }
-
-  return result.slice(0, limit);
+    return hay.includes(q);
+  });
+  return matched.slice(0, limit);
 }

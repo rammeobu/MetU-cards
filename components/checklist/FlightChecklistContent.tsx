@@ -5,7 +5,8 @@ import { ExternalLink, Plane } from "lucide-react";
 import { AirportSearchField } from "@/components/onboarding/AirportSearchField";
 import { Counter } from "@/components/ui/Counter";
 import { DateField } from "@/components/ui/DateField";
-import { formatPlaceFlightLabel } from "@/lib/places/autocomplete";
+import type { AirportPlace } from "@/lib/airports/data";
+import { formatAirportInputLabel } from "@/lib/airports/data";
 import { buildAgodaFlightSearchUrl, resolveIataCode } from "@/lib/flights/agoda-url";
 import { buildGoogleFlightsSearchUrl } from "@/lib/flights/google-flights-url";
 import { buildNaverFlightsUrl } from "@/lib/flights/naver-flights-url";
@@ -22,6 +23,10 @@ function defaultDate(offsetDays: number): string {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
   return date.toISOString().slice(0, 10);
+}
+
+function formatFlightSearchValue(place: AirportPlace): string {
+  return formatAirportInputLabel(place);
 }
 
 export function FlightChecklistContent() {
@@ -84,14 +89,14 @@ export function FlightChecklistContent() {
         placeholder="인천 (ICN)"
         value={origin}
         onChange={setOrigin}
-        formatValue={formatPlaceFlightLabel}
+        formatValue={formatFlightSearchValue}
       />
       <AirportSearchField
         label="도착"
         placeholder="도쿄 나리타 (NRT)"
         value={destination}
         onChange={setDestination}
-        formatValue={formatPlaceFlightLabel}
+        formatValue={formatFlightSearchValue}
       />
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5 text-sm font-bold text-ink-heading">

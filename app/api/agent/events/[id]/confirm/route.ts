@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { readBodyLimited } from "@/lib/agent/body-limit";
 import { getAgentEventForUser } from "@/lib/agent/event-access";
 import { confirmEventReviews } from "@/lib/agent/run";
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -18,8 +17,6 @@ const ItemSchema = z.object({
 
 const BodySchema = z.object({
   items: z.array(ItemSchema).optional(),
-  /** merge: 영수증을 기존 지출에 합치기, separate(기본): 별개로 저장 */
-  mode: z.enum(["merge", "separate"]).optional(),
 });
 
 export async function POST(
@@ -31,8 +28,6 @@ export async function POST(
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const { id: eventId } = await context.params;
   if (!IdSchema.safeParse(eventId).success) {
@@ -45,20 +40,15 @@ export async function POST(
   }
 
   let parsed: z.infer<typeof BodySchema> = {};
-  const limited = await readBodyLimited(request, 65_536);
-  if (!limited.ok) return limited.response;
-  if (limited.text.trim()) {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(limited.text) as unknown;
-    } catch {
-      return NextResponse.json({ error: "invalid-json" }, { status: 400 });
-    }
+  try {
+    const raw = await request.json();
     const result = BodySchema.safeParse(raw);
     if (!result.success) {
       return NextResponse.json({ error: "invalid-body" }, { status: 400 });
     }
     parsed = result.data;
+  } catch {
+    /* empty body → confirm all review items */
   }
 
   const items = parsed.items?.map((it) => ({
@@ -69,9 +59,7 @@ export async function POST(
   const outcome = await confirmEventReviews(
     eventId,
     guard.identity.userId,
-    items?.length || parsed.mode
-      ? { items, mode: parsed.mode }
-      : undefined
+    items?.length ? { items } : undefined
   );
 
   if (!outcome.ok) {

@@ -19,10 +19,6 @@ import {
 } from "@/lib/auth/guest-session";
 import { clearLegacyWithactKeys } from "@/lib/checklist/legacy-cleanup";
 import {
-  toUserFacingError,
-  type UserFacingError,
-} from "@/lib/errors/user-message";
-import {
   clearSupabaseAuthCookies,
   clearSupabaseAuthStorage,
   getBrowserSupabase,
@@ -30,40 +26,30 @@ import {
 } from "@/lib/supabase/browser";
 import { resolveSiteOrigin } from "@/lib/site-url";
 
-const AUTH_UNAVAILABLE: UserFacingError = {
-  code: "auth-unconfigured",
-  message: "지금은 로그인을 사용할 수 없어요. 잠시 뒤 다시 시도해 주세요.",
-  retryable: true,
-  action: "retry",
-};
-
-function warnAuthConfig() {
-  if (process.env.NODE_ENV !== "production") {
-    console.warn("[auth] Supabase client is not configured");
-  }
-}
-
-export type SignUpResult =
-  | { status: "signed-in" }
-  | { status: "confirm-email"; email: string }
-  | { status: "error"; error: UserFacingError };
-
-export type AuthActionResult =
-  | { ok: true }
-  | { ok: false; error: UserFacingError };
-
 interface AuthContextValue {
   isReady: boolean;
   isLoggedIn: boolean;
   user: AuthUser | null;
   provider: AuthProviderKind;
-  /** Supabase 익명 세션. 쿠키 guest(provider==="guest")와는 별개. */
-  isAnonymous: boolean;
-  loginWithKakao: () => Promise<AuthActionResult>;
-  loginWithEmail: (email: string, password: string) => Promise<AuthActionResult>;
-  signUpWithEmail: (email: string, password: string) => Promise<SignUpResult>;
-  resendSignupConfirmation: (email: string) => Promise<AuthActionResult>;
-  loginAsGuest: () => Promise<AuthActionResult>;
+  /** Supabase 카카오 OAuth 시작. 오류 메시지 반환 */
+  loginWithKakao: () => Promise<string | null>;
+  /** 이메일/비밀번호 로그인. 오류 메시지 반환, 성공 시 null */
+  loginWithEmail: (email: string, password: string) => Promise<string | null>;
+  /**
+   * 이메일 회원가입.
+   * - ok: 바로 로그인됨
+   * - confirm_email: 메일 확인 필요
+   * - error: 실패
+   */
+  signUpWithEmail: (
+    email: string,
+    password: string
+  ) => Promise<
+    | { status: "ok" }
+    | { status: "confirm_email"; message: string }
+    | { status: "error"; message: string }
+  >;
+  loginAsGuest: () => Promise<void>;
   logout: () => void;
 }
 
@@ -135,11 +121,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const loginWithKakao = useCallback(async (): Promise<AuthActionResult> => {
+  const loginWithKakao = useCallback(async () => {
     const supabase = getBrowserSupabase();
     if (!supabase) {
-      warnAuthConfig();
-      return { ok: false, error: AUTH_UNAVAILABLE };
+      return "Supabase 환경변수가 없습니다. .env.local 을 확인해 주세요.";
     }
 
     const redirectTo = `${resolveSiteOrigin(window.location.origin)}/auth/callback`;
@@ -151,178 +136,99 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
-    if (error) {
-      return {
-        ok: false,
-        error: toUserFacingError({
-          source: "supabase-auth",
-          message: error.message,
-        }),
-      };
-    }
-    return { ok: true };
+    if (error) return error.message;
+    return null;
   }, []);
 
-  const loginWithEmail = useCallback(
-    async (email: string, password: string): Promise<AuthActionResult> => {
-      const supabase = getBrowserSupabase();
-      if (!supabase) {
-        warnAuthConfig();
-        return { ok: false, error: AUTH_UNAVAILABLE };
+  const loginWithEmail = useCallback(async (email: string, password: string) => {
+    const supabase = getBrowserSupabase();
+    if (!supabase) {
+      return "Supabase 환경변수가 없습니다. .env.local 을 확인해 주세요.";
+    }
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      return "이메일과 비밀번호를 입력해 주세요.";
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password,
+    });
+
+    if (error) {
+      if (error.message.toLowerCase().includes("invalid login")) {
+        return "이메일 또는 비밀번호가 올바르지 않아요.";
       }
-
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail || !password) {
-        return {
-          ok: false,
-          error: {
-            code: "validation",
-            message: "이메일과 비밀번호를 입력해 주세요.",
-            retryable: false,
-          },
-        };
+      if (error.message.toLowerCase().includes("email not confirmed")) {
+        return "이메일 인증이 아직 완료되지 않았어요. 메일함을 확인해 주세요.";
       }
+      return error.message;
+    }
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: trimmedEmail,
-        password,
-      });
+    await clearGuestSession();
+    return null;
+  }, []);
 
-      if (error) {
-        return {
-          ok: false,
-          error: toUserFacingError({
-            source: "supabase-auth",
-            message: error.message,
-          }),
-        };
-      }
-
-      await clearGuestSession();
-      return { ok: true };
-    },
-    []
-  );
-
-  const signUpWithEmail = useCallback(
-    async (email: string, password: string): Promise<SignUpResult> => {
-      const supabase = getBrowserSupabase();
-      if (!supabase) {
-        warnAuthConfig();
-        return { status: "error", error: AUTH_UNAVAILABLE };
-      }
-
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail || !password) {
-        return {
-          status: "error",
-          error: {
-            code: "validation",
-            message: "이메일과 비밀번호를 입력해 주세요.",
-            retryable: false,
-          },
-        };
-      }
-      if (password.length < 6) {
-        return {
-          status: "error",
-          error: {
-            code: "weak-password",
-            message: "비밀번호는 6자 이상으로 만들어 주세요.",
-            retryable: false,
-          },
-        };
-      }
-
-      const redirectTo = `${resolveSiteOrigin(window.location.origin)}/auth/callback`;
-      const { data, error } = await supabase.auth.signUp({
-        email: trimmedEmail,
-        password,
-        options: {
-          emailRedirectTo: redirectTo,
-        },
-      });
-
-      if (error) {
-        return {
-          status: "error",
-          error: toUserFacingError({
-            source: "supabase-auth",
-            message: error.message,
-          }),
-        };
-      }
-
-      if (data.user && !data.session) {
-        return { status: "confirm-email", email: trimmedEmail };
-      }
-
-      await clearGuestSession();
-      return { status: "signed-in" };
-    },
-    []
-  );
-
-  const resendSignupConfirmation = useCallback(
-    async (email: string): Promise<AuthActionResult> => {
-      const supabase = getBrowserSupabase();
-      if (!supabase) {
-        warnAuthConfig();
-        return { ok: false, error: AUTH_UNAVAILABLE };
-      }
-
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail) {
-        return {
-          ok: false,
-          error: {
-            code: "validation",
-            message: "이메일을 입력해 주세요.",
-            retryable: false,
-          },
-        };
-      }
-
-      const redirectTo = `${resolveSiteOrigin(window.location.origin)}/auth/callback`;
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: trimmedEmail,
-        options: { emailRedirectTo: redirectTo },
-      });
-
-      if (error) {
-        return {
-          ok: false,
-          error: toUserFacingError({
-            source: "supabase-auth",
-            message: error.message,
-          }),
-        };
-      }
-
-      return { ok: true };
-    },
-    []
-  );
-
-  const loginAsGuest = useCallback(async (): Promise<AuthActionResult> => {
-    clearLegacyWithactKeys();
-    const saved = await saveGuestSession();
-    if (!saved) {
+  const signUpWithEmail = useCallback(async (email: string, password: string) => {
+    const supabase = getBrowserSupabase();
+    if (!supabase) {
       return {
-        ok: false,
-        error: {
-          code: "guest-failed",
-          message:
-            "둘러보기를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.",
-          retryable: true,
-          action: "retry",
-        },
+        status: "error" as const,
+        message: "Supabase 환경변수가 없습니다. .env.local 을 확인해 주세요.",
       };
     }
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      return {
+        status: "error" as const,
+        message: "이메일과 비밀번호를 입력해 주세요.",
+      };
+    }
+    if (password.length < 6) {
+      return {
+        status: "error" as const,
+        message: "비밀번호는 6자 이상이어야 해요.",
+      };
+    }
+
+    const redirectTo = `${resolveSiteOrigin(window.location.origin)}/auth/callback`;
+    const { data, error } = await supabase.auth.signUp({
+      email: trimmedEmail,
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+      },
+    });
+
+    if (error) {
+      if (error.message.toLowerCase().includes("already registered")) {
+        return {
+          status: "error" as const,
+          message: "이미 가입된 이메일이에요. 로그인해 주세요.",
+        };
+      }
+      return { status: "error" as const, message: error.message };
+    }
+
+    if (data.user && !data.session) {
+      return {
+        status: "confirm_email" as const,
+        message:
+          "가입은 됐지만 확인 메일이 안 올 수 있어요. Supabase 기본 메일은 팀원 이메일만 받고, 그 외는 Custom SMTP가 필요해요. 당장 쓰려면 Dashboard → Authentication → Providers → Email에서 Confirm email을 끄세요.",
+      };
+    }
+
+    await clearGuestSession();
+    return { status: "ok" as const };
+  }, []);
+
+  const loginAsGuest = useCallback(async () => {
+    clearLegacyWithactKeys();
+    await saveGuestSession();
     setIsGuest(true);
     setUser(null);
-    return { ok: true };
   }, []);
 
   const provider: AuthProviderKind = user
@@ -355,18 +261,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const isAnonymous = Boolean(user?.is_anonymous);
   const value = useMemo(
     () => ({
       isReady,
       isLoggedIn: Boolean(user) || isGuest,
       user,
       provider,
-      isAnonymous,
       loginWithKakao,
       loginWithEmail,
       signUpWithEmail,
-      resendSignupConfirmation,
       loginAsGuest,
       logout,
     }),
@@ -375,11 +278,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isGuest,
       provider,
-      isAnonymous,
       loginWithKakao,
       loginWithEmail,
       signUpWithEmail,
-      resendSignupConfirmation,
       loginAsGuest,
       logout,
     ]

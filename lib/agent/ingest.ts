@@ -74,8 +74,6 @@ export type CreateEventInput = {
   idempotencyKey: string;
   /** Defaults to received; use unassigned when no trip matches. */
   status?: AgentEventStatus;
-  /** Optional result JSON (e.g. parse preview for unassigned). */
-  result?: Record<string, unknown> | null;
 };
 
 export type CreateEventResult =
@@ -92,22 +90,17 @@ export async function createEvent(
   const status: AgentEventStatus =
     input.status ?? (input.tripId ? "received" : "unassigned");
 
-  const row: Record<string, unknown> = {
-    user_id: input.userId,
-    trip_id: input.tripId,
-    source: input.source,
-    kind: input.kind,
-    payload: input.payload,
-    idempotency_key: input.idempotencyKey,
-    status,
-  };
-  if (input.result != null) {
-    row.result = input.result;
-  }
-
   const { data, error } = await admin
     .from("agent_events")
-    .insert(row)
+    .insert({
+      user_id: input.userId,
+      trip_id: input.tripId,
+      source: input.source,
+      kind: input.kind,
+      payload: input.payload,
+      idempotency_key: input.idempotencyKey,
+      status,
+    })
     .select("id")
     .maybeSingle();
 

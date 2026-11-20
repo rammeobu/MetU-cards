@@ -7,7 +7,7 @@
 @layer base {
   html,
   body {
-    @apply bg-mu-bg text-mu-fg-2 antialiased;
+    @apply bg-surface-base text-ink-body antialiased;
   }
 
   /* 숫자 입력에서 브라우저 기본 스피너 제거 (온보딩 예산 입력용) */
@@ -19,15 +19,6 @@
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
-  }
-
-  /* iOS: avoid auto-zoom on focus (needs ≥16px) after enabling pinch zoom */
-  @media (max-width: 767px) {
-    input,
-    select,
-    textarea {
-      font-size: 16px;
-    }
   }
 }
 
@@ -41,7 +32,16 @@
     scrollbar-width: none;
   }
 
-  /* Wave A: 레거시 ai-* 유틸은 mu solid 별칭만 유지 (신규 사용 금지). */
+  @keyframes gradient-shift {
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
   @keyframes ai-thinking-slide {
     0% {
       transform: translateX(-120%);
@@ -52,53 +52,82 @@
   }
 
   .ai-gradient-text {
-    color: var(--mu-accent);
+    background-image: linear-gradient(
+      to right,
+      theme("colors.brand.DEFAULT"),
+      theme("colors.brand.mid"),
+      theme("colors.brand.soft")
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: gradient-shift 5s ease-in-out infinite;
   }
 
   .ai-gradient-bg {
-    background-color: var(--mu-accent);
-    background-image: none;
+    background-color: #2563eb;
+    background-image: linear-gradient(
+      135deg,
+      #2563eb 0%,
+      #3b82f6 45%,
+      #6366f1 100%
+    );
   }
 
   .ai-thinking-ring {
     background: conic-gradient(
       from 90deg,
       transparent 0%,
-      var(--mu-accent) 35%,
-      var(--mu-accent-soft) 70%,
+      theme("colors.brand.DEFAULT") 35%,
+      theme("colors.brand.soft") 70%,
       transparent 100%
     );
   }
 
   .ai-surface-card {
     border-radius: 20px;
-    border: 1px solid var(--mu-line);
-    background: var(--mu-card);
+    border: 1px solid rgba(211, 228, 254, 0.8);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(4px);
   }
 
   .ai-chip {
     border-radius: 9999px;
-    border: 1px solid var(--mu-line);
-    background: var(--mu-accent-soft);
+    border: 1px solid color-mix(in srgb, theme("colors.brand.DEFAULT") 15%, transparent);
+    background: color-mix(in srgb, theme("colors.brand.DEFAULT") 8%, transparent);
     padding: 0.25rem 0.75rem;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.025em;
-    color: var(--mu-accent);
+    color: theme("colors.brand.DEFAULT");
   }
 
   .ai-glass-chip {
     border-radius: 9999px;
-    border: 1px solid var(--mu-line);
-    background: var(--mu-card);
+    border: 1px solid rgba(211, 228, 254, 0.8);
+    background: rgba(255, 255, 255, 0.8);
     padding: 0.25rem 0.75rem;
     font-size: 11px;
     font-weight: 600;
-    color: var(--mu-fg-2);
+    color: #434655;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    backdrop-filter: blur(4px);
   }
 
   .ai-page-ambient {
-    background: var(--mu-bg);
+    background:
+      radial-gradient(
+        ellipse 90% 45% at 50% -8%,
+        color-mix(in srgb, theme("colors.brand.DEFAULT") 10%, transparent),
+        transparent
+      ),
+      linear-gradient(
+        180deg,
+        theme("colors.surface.base") 0%,
+        theme("colors.surface.base") 100%
+      );
   }
 
   @keyframes buddy-dot-bounce {
@@ -220,119 +249,5 @@
     .egg-firework-particle {
       opacity: 0;
     }
-  }
-}
-
-/* =============================================================================
- * UX-S0 mu-* design tokens (additive only — do not edit rules above)
- * ============================================================================= */
-:root {
-  --mu-bg: #f7f8fa;
-  --mu-card: #ffffff;
-  --mu-sunken: #f2f4f6;
-  --mu-line: #e5e8eb;
-  --mu-line-strong: #8b95a1;
-  --mu-fg: #191f28;
-  --mu-fg-2: #4e5968;
-  --mu-fg-3: #5f6b7a;
-  --mu-accent: #2563eb;
-  --mu-accent-strong: #1d4ed8;
-  --mu-accent-soft: #eff4ff;
-  --mu-on-accent: #ffffff;
-  --mu-ok: #0b7a4b;
-  --mu-ok-soft: #e8f7f0;
-  --mu-warn: #8a5a00;
-  --mu-warn-soft: #fff4db;
-  --mu-err: #c62828;
-  --mu-err-soft: #fdecec;
-  --mu-disabled-fg: #8b95a1;
-  --mu-disabled-bg: #f2f4f6;
-  --mu-dur-fast: 150ms;
-  --mu-dur: 200ms;
-  --mu-dur-slow: 250ms;
-  --mu-ease: cubic-bezier(0.2, 0, 0, 1);
-}
-
-.mu-root {
-  font-family:
-    Pretendard,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  word-break: keep-all;
-  color: var(--mu-fg);
-}
-
-.mu-num {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
-}
-
-.mu-focus:focus-visible {
-  outline: 2px solid var(--mu-accent);
-  outline-offset: 2px;
-}
-
-@keyframes mu-sheet-up {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes mu-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes mu-pop {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --mu-dur-fast: 1ms;
-    --mu-dur: 1ms;
-    --mu-dur-slow: 1ms;
-  }
-}
-
-@keyframes slideUpFade {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-stagger-in {
-  opacity: 0;
-  animation: slideUpFade 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-stagger-in {
-    opacity: 1;
-    animation: none;
-    transform: none;
   }
 }

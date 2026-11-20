@@ -8,8 +8,6 @@ describe("isPublicApiPath", () => {
     expect(isPublicApiPath("/api/agent/sweep")).toBe(true);
     expect(isPublicApiPath("/api/agent/cron/daily")).toBe(true);
     expect(isPublicApiPath("/api/auth/guest")).toBe(true);
-    expect(isPublicApiPath("/api/places/autocomplete")).toBe(true);
-    expect(isPublicApiPath("/api/places/search")).toBe(false);
   });
 
   it("requires session for ledger and agent write APIs", () => {

@@ -43,16 +43,14 @@ function signals(partial: Partial<PolicySignals> = {}): PolicySignals {
 }
 
 describe("decide", () => {
-  it("all gates pass → review (suggestion_only, no auto_commit)", () => {
-    const r = decide(draft(), signals(), baseEnv);
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBe("suggestion_only");
+  it("auto_commit when all gates pass", () => {
+    expect(decide(draft(), signals(), baseEnv).decision).toBe("auto_commit");
   });
 
   it("confidence exactly 0.85 auto", () => {
     expect(
       decide(draft({ confidence: 0.85 }), signals(), baseEnv).decision
-    ).toBe("review");
+    ).toBe("auto_commit");
   });
 
   it("confidence 0.849 review", () => {
@@ -64,7 +62,7 @@ describe("decide", () => {
   it("amount exactly max auto", () => {
     expect(
       decide(draft({ krwAmount: 300_000 }), signals(), baseEnv).decision
-    ).toBe("review");
+    ).toBe("auto_commit");
   });
 
   it("amount over max review", () => {
@@ -98,7 +96,7 @@ describe("decide", () => {
         }),
         baseEnv
       ).decision
-    ).toBe("review");
+    ).toBe("auto_commit");
   });
 
   it("duplicate score 0.6 review not ignore", () => {
@@ -196,7 +194,7 @@ describe("decide", () => {
         signals(),
         { ...baseEnv, autoReceipt: true }
       ).decision
-    ).toBe("review");
+    ).toBe("auto_commit");
   });
 
   it("payer mismatch review", () => {
@@ -209,263 +207,5 @@ describe("decide", () => {
     expect(
       decide(draft({ unresolvedNames: ["민수"] }), signals(), baseEnv).decision
     ).toBe("review");
-  });
-});
-
-describe("decide — receipt merge", () => {
-  const receipt = (p: Partial<PricedDraft> = {}) =>
-    draft({ origin: "receipt", confidence: 0.95, ...p });
-  const strong = (p: Record<string, unknown> = {}) => ({
-    expenseId: "e1",
-    score: 0.9,
-    strong: true,
-    receiptAttached: false,
-    timeKnown: true,
-    merchantSimilar: false,
-    ...p,
-  });
-
-  it("strong 중복 + 단일 후보 + 영수증 없음 → merge (AUTO_RECEIPT 미설정이어도 새 지출 없음)", () => {
-    const r = decide(
-      receipt(),
-      signals({ duplicateCandidates: [strong()] }),
-      baseEnv
-    );
-    expect(r.decision).toBe("merge");
-    expect(r.mergeExpenseId).toBe("e1");
-  });
-
-  it("기존 지출에 이미 영수증이 있으면 review (합치기/별개로 저장)", () => {
-    const r = decide(
-      receipt(),
-      signals({ duplicateCandidates: [strong({ receiptAttached: true })] }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.duplicateOfExpenseId).toBe("e1");
-    expect(r.reasons[0]).toContain("이미 같은 결제가 있어요");
-  });
-
-  it("시각을 모르고 상호도 다르면 review", () => {
-    const r = decide(
-      receipt(),
-      signals({
-        duplicateCandidates: [strong({ timeKnown: false, merchantSimilar: false })],
-      }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.duplicateOfExpenseId).toBe("e1");
-  });
-
-  it("시각을 몰라도 상호가 비슷하면 merge", () => {
-    const r = decide(
-      receipt(),
-      signals({
-        duplicateCandidates: [strong({ timeKnown: false, merchantSimilar: true })],
-      }),
-      baseEnv
-    );
-    expect(r.decision).toBe("merge");
-  });
-
-  it("strong 후보가 여러 건이면 review (임의로 합치지 않는다)", () => {
-    const r = decide(
-      receipt(),
-      signals({
-        duplicateCandidates: [strong(), strong({ expenseId: "e2", score: 0.85 })],
-      }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.mergeExpenseId).toBeUndefined();
-  });
-
-  it("strong 이 아니면(soft) 영수증은 기존처럼 review", () => {
-    const r = decide(
-      receipt(),
-      signals({
-        duplicateCandidates: [strong({ strong: false, score: 0.7 })],
-      }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.mergeExpenseId).toBeUndefined();
-  });
-
-  it("카드 문자(rule)는 strong 신호가 있어도 merge 하지 않고 자동 저장도 안 한다", () => {
-    const r = decide(
-      draft(),
-      signals({ duplicateCandidates: [strong()] }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-  });
-});
-describe("decide — tripMatchRule (날짜 매칭이 느슨하면 자동 저장 금지)", () => {
-  it("exact → review (suggestion_only)", () => {
-    expect(
-      decide(draft(), signals({ tripMatchRule: "exact" }), baseEnv).decision
-    ).toBe("review");
-  });
-
-  it("명시한 여행(규칙 없음)도 review (suggestion_only)", () => {
-    expect(
-      decide(draft(), signals({ tripMatchRule: undefined }), baseEnv).decision
-    ).toBe("review");
-  });
-
-  it.each(["near", "single", "none"] as const)(
-    "%s → review (trip_match_uncertain), 임계값을 모두 통과해도 자동 저장 안 함",
-    (rule) => {
-      const r = decide(draft(), signals({ tripMatchRule: rule }), baseEnv);
-      expect(r.decision).toBe("review");
-      expect(r.reasonCode).toBe("trip_match_uncertain");
-      expect(r.reasons.join(" ")).toContain("여행 날짜");
-    }
-  );
-
-  it("취소·환불은 규칙과 무관하게 기존 사유 그대로 review", () => {
-    const r = decide(
-      draft({ kind: "cancel" }),
-      signals({ tripMatchRule: "near" }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBeUndefined();
-  });
-});
-
-describe("decide — 환율 확정 실패 (fx_unresolved)", () => {
-  const foreign = { currency: "JPY", amount: 1200 };
-
-  it("환율 미확정 → review + reasonCode fx_unresolved", () => {
-    const r = decide(
-      draft({ ...foreign, fxResolved: false }),
-      signals({ tripMatchRule: "exact" }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBe("fx_unresolved");
-  });
-
-  it("폴백 환율도 review + fx_unresolved", () => {
-    const r = decide(
-      draft({ ...foreign, fxResolved: true, fxIsFallback: true }),
-      signals({ tripMatchRule: "exact" }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBe("fx_unresolved");
-  });
-
-  it("환율이 확정이면 suggestion_only 로 확인해요", () => {
-    const r = decide(
-      draft({ ...foreign, fxResolved: true, fxIsFallback: false }),
-      signals({ tripMatchRule: "exact" }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBe("suggestion_only");
-  });
-
-  it("여행 불확실이 먼저면 trip_match_uncertain 을 유지해요", () => {
-    const r = decide(
-      draft({ ...foreign, fxResolved: false }),
-      signals({ tripMatchRule: "near" }),
-      baseEnv
-    );
-    expect(r.reasonCode).toBe("trip_match_uncertain");
-  });
-});
-describe("decide — K1 외화↔해외 원화 청구 병합 (mergeKind=billed_krw)", () => {
-  const cand = {
-    id: "f1",
-    score: 0.9,
-    reasons: ["amount_in_band", "within_30min"],
-    timeKnown: true,
-    withinWindow: true,
-    diffRatio: 0.03,
-  };
-
-  it("auto → merge + billed_krw + 대상 id", () => {
-    const r = decide(
-      draft(),
-      signals({ fxMerge: { kind: "auto", target: cand } }),
-      baseEnv
-    );
-    expect(r.decision).toBe("merge");
-    expect(r.mergeKind).toBe("billed_krw");
-    expect(r.mergeExpenseId).toBe("f1");
-  });
-
-  it.each(["multiple", "time_unknown", "time_outside", "low_score"] as const)(
-    "review(%s) → 자동 병합 금지, 후보를 돌려줌",
-    (reason) => {
-      const r = decide(
-        draft(),
-        signals({
-          fxMerge: {
-            kind: "review",
-            reason,
-            candidates: [cand, { ...cand, id: "f2", score: 0.4 }],
-          },
-        }),
-        baseEnv
-      );
-      expect(r.decision).toBe("review");
-      expect(r.mergeKind).toBe("billed_krw");
-      expect(r.reasonCode).toBe("fx_merge_review");
-      expect(r.mergeExpenseId).toBeUndefined();
-      expect(r.duplicateOfExpenseId).toBe("f1");
-      expect(r.fxMergeCandidates).toHaveLength(2);
-    }
-  );
-
-  it("none 이면 기존 규칙 그대로 (자동 저장)", () => {
-    const r = decide(draft(), signals({ fxMerge: { kind: "none" } }), baseEnv);
-    expect(r.decision).toBe("review");
-    expect(r.mergeKind).toBeUndefined();
-  });
-
-  it("취소·환불은 병합하지 않고 review", () => {
-    const r = decide(
-      draft({ kind: "cancel" }),
-      signals({ fxMerge: { kind: "auto", target: cand } }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.mergeKind).toBeUndefined();
-  });
-
-  it("여행이 불확실하면 병합보다 trip_match_uncertain 이 먼저", () => {
-    const r = decide(
-      draft(),
-      signals({ tripMatchRule: "near", fxMerge: { kind: "auto", target: cand } }),
-      baseEnv
-    );
-    expect(r.decision).toBe("review");
-    expect(r.reasonCode).toBe("trip_match_uncertain");
-  });
-
-  it("영수증 첨부 merge 는 mergeKind=receipt_attach", () => {
-    const r = decide(
-      draft({ origin: "receipt", confidence: 0.95 }),
-      signals({
-        duplicateCandidates: [
-          {
-            expenseId: "e1",
-            score: 0.95,
-            strong: true,
-            timeKnown: true,
-            merchantSimilar: false,
-            receiptAttached: false,
-          },
-        ],
-      }),
-      baseEnv
-    );
-    expect(r.decision).toBe("merge");
-    expect(r.mergeKind).toBe("receipt_attach");
   });
 });

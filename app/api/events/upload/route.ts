@@ -1,69 +1,23 @@
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { createEvent } from "@/lib/agent/ingest";
 import { detectImageMime } from "@/lib/agent/image-magic";
-import { runIngest } from "@/lib/agent/ingest-pipeline";
 import { assertTripMember } from "@/lib/agent/membership";
+import { processEvent } from "@/lib/agent/run";
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { apiInternalError } from "@/lib/api/respond";
-import {
-  MULTIPART_OVERHEAD_BYTES,
-  receiptMaxImageBytes,
-} from "@/lib/ledger/image-limits";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
+
+const MAX_BYTES = 4 * 1024 * 1024;
 
 const FieldsSchema = z.object({
   tripId: z.string().uuid(),
   source: z.enum(["upload", "share", "manual"]).default("upload"),
 });
-
-const ExifSchema = z
-  .object({
-    takenAt: z
-      .string()
-      .min(10)
-      .max(40)
-      .refine((s) => !Number.isNaN(Date.parse(s)), "bad-takenAt")
-      .optional(),
-    lat: z.number().min(-90).max(90).optional(),
-    lng: z.number().min(-180).max(180).optional(),
-  })
-  .strict();
-
-function parseExifFromForm(form: FormData):
-  | { ok: true; exif?: { takenAt?: string; lat?: number; lng?: number } }
-  | { ok: false } {
-  const takenRaw = form.get("exifTakenAt");
-  const latRaw = form.get("exifLat");
-  const lngRaw = form.get("exifLng");
-  if (takenRaw == null && latRaw == null && lngRaw == null) {
-    return { ok: true };
-  }
-  const candidate: {
-    takenAt?: string;
-    lat?: number;
-    lng?: number;
-  } = {};
-  if (typeof takenRaw === "string" && takenRaw.trim()) {
-    candidate.takenAt = takenRaw.trim();
-  }
-  if (typeof latRaw === "string" && latRaw.trim()) {
-    const n = Number(latRaw);
-    if (!Number.isFinite(n)) return { ok: false };
-    candidate.lat = n;
-  }
-  if (typeof lngRaw === "string" && lngRaw.trim()) {
-    const n = Number(lngRaw);
-    if (!Number.isFinite(n)) return { ok: false };
-    candidate.lng = n;
-  }
-  const parsed = ExifSchema.safeParse(candidate);
-  if (!parsed.success) return { ok: false };
-  return { ok: true, exif: parsed.data };
-}
 
 export async function POST(request: Request) {
   const guard = await guardApi(request, { bucket: "ledger-vision" });
@@ -71,16 +25,10 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const declared = Number(request.headers.get("content-length") ?? "NaN");
-  const maxBytes = receiptMaxImageBytes();
-  // multipart overhead + file
-  if (
-    Number.isFinite(declared) &&
-    declared > maxBytes + MULTIPART_OVERHEAD_BYTES
-  ) {
+  // multipart overhead + 4MB file
+  if (Number.isFinite(declared) && declared > MAX_BYTES + 256_000) {
     return NextResponse.json({ error: "payload-too-large" }, { status: 413 });
   }
 
@@ -98,10 +46,6 @@ export async function POST(request: Request) {
   if (!fields.success) {
     return NextResponse.json({ error: "validation-failed" }, { status: 400 });
   }
-  const exifParsed = parseExifFromForm(form);
-  if (!exifParsed.ok) {
-    return NextResponse.json({ error: "invalid-exif" }, { status: 400 });
-  }
 
   const member = await assertTripMember(
     guard.identity.userId,
@@ -115,7 +59,7 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "file-required" }, { status: 400 });
   }
-  if (file.size > maxBytes) {
+  if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: "payload-too-large" }, { status: 413 });
   }
 
@@ -146,32 +90,32 @@ export async function POST(request: Request) {
   }
 
   const idempotencyKey = `upload:${path}`;
-  const outcome = await runIngest({
+  const created = await createEvent({
     userId: guard.identity.userId,
     tripId: fields.data.tripId,
     source: fields.data.source,
     kind: "image",
-    payload: {
-      path,
-      mime,
-      ...(exifParsed.exif ? { exif: exifParsed.exif } : {}),
-    },
+    payload: { path, mime },
     idempotencyKey,
   });
 
-  if (!outcome.result.ok) {
-    return apiInternalError(outcome.result.error);
+  if (!created.ok) {
+    return NextResponse.json({ error: created.error }, { status: 500 });
   }
 
-  if (outcome.result.duplicate) {
+  if (created.duplicate) {
     return NextResponse.json(
-      { eventId: outcome.result.id, duplicate: true },
+      { eventId: created.id, duplicate: true },
       { status: 200 }
     );
   }
 
+  after(() => {
+    void processEvent(created.id);
+  });
+
   return NextResponse.json(
-    { eventId: outcome.result.id, status: "received", path },
+    { eventId: created.id, status: "received", path },
     { status: 202 }
   );
 }

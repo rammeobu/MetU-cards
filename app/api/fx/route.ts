@@ -1,32 +1,25 @@
 import { NextResponse } from "next/server";
-import { normalizeCurrencyCode } from "@/lib/fx/currencies";
+import {
+  FALLBACK_RATES,
+  type FxCurrency,
+} from "@/lib/fx/currencies";
 import { resolveLiveKrwRate } from "@/lib/fx/server";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const raw = (searchParams.get("code") ?? "USD").toUpperCase();
-  const code = normalizeCurrencyCode(raw);
+  const code = (searchParams.get("code") ?? "USD").toUpperCase() as FxCurrency;
 
-  if (!code) {
-    return NextResponse.json(
-      { error: "unsupported-currency" },
-      { status: 400 }
-    );
+  if (!(code in FALLBACK_RATES)) {
+    return NextResponse.json({ error: "unsupported-currency" }, { status: 400 });
   }
 
-  // 형식만 검증하고, open.er 미포함 통화는 Frankfurter / fx_rates last-known까지
-  // resolveLiveKrwRate 폴백에 맡긴다 (선차단 400 금지).
-  const resolved = await resolveLiveKrwRate(code);
-  if (!resolved || !(resolved.krw > 0)) {
-    return NextResponse.json({ error: "fx-unavailable" }, { status: 503 });
-  }
+  const { krw: live, source } = await resolveLiveKrwRate(code);
 
   return NextResponse.json(
     {
       code,
-      krw: resolved.krw,
-      source: resolved.source,
-      rateDate: resolved.rateDate,
+      krw: live,
+      source,
       updatedAt: new Date().toISOString(),
     },
     {

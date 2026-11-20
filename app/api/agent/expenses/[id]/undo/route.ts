@@ -2,10 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { readBodyLimited } from "@/lib/agent/body-limit";
 import { assertTripMember } from "@/lib/agent/membership";
-import { apiError, apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -20,8 +18,6 @@ export async function POST(
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const { id: expenseId } = await context.params;
   if (!IdSchema.safeParse(expenseId).success) {
@@ -40,7 +36,7 @@ export async function POST(
     .maybeSingle();
 
   if (loadErr) {
-    return apiInternalError(loadErr.message);
+    return NextResponse.json({ error: loadErr.message }, { status: 500 });
   }
   if (!expense) {
     return NextResponse.json({ error: "not-found" }, { status: 404 });
@@ -53,17 +49,13 @@ export async function POST(
   }
 
   let reason = "inbox_undo";
-  const limited = await readBodyLimited(request, 4_096);
-  if (!limited.ok) return limited.response;
-  if (limited.text.trim()) {
-    try {
-      const body = JSON.parse(limited.text) as { reason?: string };
-      if (typeof body.reason === "string" && body.reason.trim()) {
-        reason = body.reason.trim().slice(0, 200);
-      }
-    } catch {
-      return NextResponse.json({ error: "invalid-json" }, { status: 400 });
+  try {
+    const body = (await request.json()) as { reason?: string };
+    if (typeof body.reason === "string" && body.reason.trim()) {
+      reason = body.reason.trim().slice(0, 200);
     }
+  } catch {
+    /* optional body */
   }
 
   const { data, error } = await admin.rpc("agent_void_expense", {
@@ -74,10 +66,8 @@ export async function POST(
 
   if (error) {
     const msg = error.message ?? "void-failed";
-    if (/forbidden/i.test(msg)) {
-      return apiError("forbidden", 403, { log: msg });
-    }
-    return apiInternalError(msg);
+    const status = /forbidden/i.test(msg) ? 403 : 500;
+    return NextResponse.json({ error: msg }, { status });
   }
 
   return NextResponse.json({ ok: true, result: data });

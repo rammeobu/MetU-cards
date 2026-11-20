@@ -4,199 +4,122 @@ import {
   buildRecommendedDealsPrompt,
   getDealsSystemPrompt,
 } from "@/lib/ai/prompts/insight-prompts";
-import {
-  dealIdFromName,
-  normalizeDealTierLabel,
-  type DealPlace,
-} from "@/lib/deals/data";
+import { MOCK_DEALS, type DealPlace } from "@/lib/deals/data";
 import { getMonthDealTip } from "@/lib/rag/monthDeals";
-import { getOrSet } from "@/lib/server/cache";
-import { resolveDestinationImage } from "@/lib/trips/destination-image";
 
-const CACHE_TTL_SEC = 24 * 60 * 60;
-const TARGET_COUNT = 6;
-
-export type CuratedDealsResult = {
-  places: DealPlace[];
-  source: "ai+rag" | "cache" | "rag" | "empty";
-  hit: "fresh" | "stale" | "miss";
-};
-
-/** RAG cheapPlaces → 국가 추정. 가격 숫자 없음. */
-const PLACE_COUNTRY: Record<string, string> = {
-  런던: "영국",
-  파리: "프랑스",
-  오사카: "일본",
-  방콕: "태국",
-  프라하: "체코",
-  도쿄: "일본",
-  제주: "한국",
-  타이베이: "대만",
-  교토: "일본",
-  부산: "한국",
-  다낭: "베트남",
-  홍콩: "홍콩",
-  후쿠오카: "일본",
-  발리: "인도네시아",
-  오키나와: "일본",
-  홋카이도: "일본",
-  삿포로: "일본",
-  "파리(비수기 초입)": "프랑스",
-};
-
-/**
- * AI/캐시가 비었을 때 시즌 RAG 큐레이션으로 채운다.
- * 가짜 가격·항공료를 만들지 않고, monthDeals 후보만 DealPlace 로 옮긴다.
- */
-export function ragFallbackDeals(now = Date.now()): DealPlace[] {
-  const { month } = kstMonthYear(now);
+function monthAwareFallback(month: number): DealPlace[] {
   const tip = getMonthDealTip(month);
-  const rows = tip.cheapPlaces.map((name) => {
-    const clean = name.replace(/\(.*?\)/g, "").trim() || name.trim();
-    return {
-      name: clean,
-      country: PLACE_COUNTRY[name] ?? PLACE_COUNTRY[clean] ?? "해외",
-      bestMonth: `${month}월`,
-      highlight: tip.dealReason.slice(0, 120),
-      tier: "가성비",
-    };
+  const cheap = new Set(tip.cheapPlaces.map((p) => p.replace(/\(.*\)/g, "").trim()));
+
+  const scored = MOCK_DEALS.map((deal, index) => {
+    let score = MOCK_DEALS.length - index;
+    if (cheap.has(deal.name)) score += 20;
+    if (tip.cheapPlaces.some((p) => p.includes(deal.name) || deal.name.includes(p))) {
+      score += 10;
+    }
+    return { deal, score };
   });
-  return toDealPlaces(rows);
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .map(({ deal }) => ({
+      ...deal,
+      highlight:
+        cheap.has(deal.name) ||
+        tip.cheapPlaces.some((p) => p.includes(deal.name))
+          ? `${month}월 시즌 가성비 후보`
+          : deal.highlight,
+    }));
 }
 
-type CachedDealsPayload = { places: DealPlace[] };
+function applyAiOrder(
+  base: DealPlace[],
+  rows: { id: string; highlight: string }[]
+): DealPlace[] | null {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
 
-/** KST calendar YYYY-MM-DD */
-function kstYmd(now = Date.now()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
-function dealsCacheKey(now = Date.now()): string {
-  return `deals:v1:${kstYmd(now)}`;
-}
-
-function kstMonthYear(now = Date.now()): { month: number; year: number } {
-  const ymd = kstYmd(now);
-  const [y, m] = ymd.split("-").map((v) => Number(v));
-  return { year: y || new Date(now).getFullYear(), month: m || 1 };
-}
-
-function toDealPlaces(
-  rows: {
-    name: string;
-    country: string;
-    bestMonth: string;
-    highlight: string;
-    tier: string;
-  }[]
-): DealPlace[] {
+  const byId = new Map(base.map((deal) => [deal.id, deal]));
   const used = new Set<string>();
-  const places: DealPlace[] = [];
+  const next: DealPlace[] = [];
 
   for (const row of rows) {
-    if (places.length >= TARGET_COUNT) break;
-    const name = row.name.trim();
-    const country = row.country.trim();
-    if (!name || !country) continue;
-
-    let id = dealIdFromName(name);
-    if (used.has(id)) {
-      id = `${id}-${places.length + 1}`;
-    }
+    const id = row.id?.trim();
+    if (!id || used.has(id) || !byId.has(id)) continue;
+    const deal = byId.get(id)!;
     used.add(id);
-
-    places.push({
-      id,
-      name,
-      country,
-      budgetLabel: normalizeDealTierLabel(row.tier),
-      bestMonth: row.bestMonth.trim().slice(0, 40) || `${kstMonthYear().month}월`,
-      highlight: row.highlight.trim().slice(0, 120),
-      imageUrl: resolveDestinationImage(name, country),
+    next.push({
+      ...deal,
+      highlight:
+        typeof row.highlight === "string" && row.highlight.trim()
+          ? row.highlight.trim().slice(0, 120)
+          : deal.highlight,
     });
   }
 
-  return places;
+  for (const deal of base) {
+    if (!used.has(deal.id)) next.push(deal);
+  }
+
+  return next.length > 0 ? next : null;
 }
 
 /**
- * Gemini 로 6곳 생성. 실패·형식 불일치 시 throw → getOrSet staleIfError 용.
+ * 이번 달 시즌 RAG + LLM으로 홈 추천 여행지를 큐레이션.
+ * AI 실패 시에도 MOCK_DEALS 기반 시즌 폴백을 반환.
  */
-async function generateDeals(): Promise<CachedDealsPayload> {
-  const { month, year } = kstMonthYear();
+export async function curateRecommendedDeals(): Promise<{
+  places: DealPlace[];
+  source: "ai+rag" | "fallback";
+}> {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
   const tip = getMonthDealTip(month);
+  const fallback = monthAwareFallback(month);
+
   const ragContexts = [
     tip.dealReason,
     tip.caution,
     `이번 달 가성비 후보: ${tip.cheapPlaces.join(", ")}`,
   ];
 
-  const prompt = buildRecommendedDealsPrompt({
-    month,
-    year,
-    ragContexts,
-  });
-
-  const chat = await aiChatOrNull({
-    mode: "deals",
-    system: getDealsSystemPrompt(),
-    prompt,
-  });
-  if (!chat) {
-    throw new Error("deals-ai-unavailable");
-  }
-
-  const parsed = parseDealsOut(chat.content);
-  if (!parsed) {
-    throw new Error("deals-parse-failed");
-  }
-
-  const places = toDealPlaces(parsed.deals);
-  if (places.length === 0) {
-    throw new Error("deals-empty");
-  }
-
-  return { places };
-}
-
-/**
- * 이번 달 시즌 RAG + LLM으로 홈 추천 여행지 생성.
- * 캐시 키 `deals:v1:YYYY-MM-DD`(KST), TTL 24h, staleIfError.
- * 키/실패 + 캐시 없음 → 빈 목록.
- */
-export async function curateRecommendedDeals(): Promise<CuratedDealsResult> {
-  const key = dealsCacheKey();
-
   try {
-    const cached = await getOrSet(key, CACHE_TTL_SEC, generateDeals, {
-      staleIfError: true,
+    const prompt = buildRecommendedDealsPrompt({
+      month,
+      year,
+      candidates: MOCK_DEALS.map((deal) => ({
+        id: deal.id,
+        name: deal.name,
+        country: deal.country,
+        budgetLabel: deal.budgetLabel,
+        bestMonth: deal.bestMonth,
+        highlight: deal.highlight,
+      })),
+      ragContexts,
     });
-    const places = Array.isArray(cached.value?.places)
-      ? cached.value.places
-      : [];
-    if (places.length === 0) {
-      const rag = ragFallbackDeals();
-      if (rag.length === 0) {
-        return { places: [], source: "empty", hit: cached.hit };
-      }
-      return { places: rag, source: "rag", hit: cached.hit };
+
+    const chat = await aiChatOrNull({
+      mode: "deals",
+      system: getDealsSystemPrompt(),
+      prompt,
+    });
+    if (!chat) {
+      return { places: fallback, source: "fallback" };
     }
-    return {
-      places,
-      source: cached.hit === "miss" ? "ai+rag" : "cache",
-      hit: cached.hit,
-    };
+
+    const parsed = parseDealsOut(chat.content);
+    if (!parsed) {
+      return { places: fallback, source: "fallback" };
+    }
+
+    const ordered = applyAiOrder(MOCK_DEALS, parsed.deals);
+    if (!ordered) {
+      return { places: fallback, source: "fallback" };
+    }
+
+    return { places: ordered, source: "ai+rag" };
   } catch (error) {
     console.error("[recommended-deals]", error);
-    const rag = ragFallbackDeals();
-    if (rag.length === 0) {
-      return { places: [], source: "empty", hit: "miss" };
-    }
-    return { places: rag, source: "rag", hit: "miss" };
+    return { places: fallback, source: "fallback" };
   }
 }

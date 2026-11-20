@@ -1,21 +1,17 @@
 import "server-only";
 
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
-import { stripDuplicatedSmsTitle } from "@/lib/agent/sms-text";
 import {
   parseCardSms,
   splitSmsBatch,
   type SmsContext,
 } from "@/lib/ledger/sms/parse";
 
-export { preferSmsParseText, stripDuplicatedSmsTitle } from "@/lib/agent/sms-text";
-
 export function extractTextDrafts(
   text: string,
   ctx: SmsContext
 ): ExpenseDraftInput[] {
-  const normalized = stripDuplicatedSmsTitle(text);
-  const chunks = splitSmsBatch(normalized);
+  const chunks = splitSmsBatch(text);
   const drafts: ExpenseDraftInput[] = [];
 
   for (const chunk of chunks) {
@@ -50,7 +46,6 @@ export function extractTextDrafts(
       paymentMethod: "card",
       confidence: parsed.confidence,
       kind: parsed.kind === "cancel" ? "cancel" : parsed.kind === "approval" ? "approval" : "unknown",
-      overseas: parsed.overseas,
       warnings: parsed.warnings,
       rawInput: { text: chunk, parsed },
     });

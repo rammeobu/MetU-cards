@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { readJsonLimited } from "@/lib/agent/body-limit";
 import { guardApi } from "@/lib/security/guard";
 import type { DaySchedule } from "@/lib/ai/types";
 import { optimizeDailyScheduleRoutes } from "@/lib/route/optimize-schedule";
@@ -15,9 +14,7 @@ export async function POST(request: Request) {
   if (guard instanceof NextResponse) return guard;
 
   try {
-    const limited = await readJsonLimited(request, 256_000);
-    if (!limited.ok) return limited.response;
-    const body = limited.json as {
+    const body = (await request.json()) as {
       dailySchedule?: DaySchedule[];
       destination?: string;
       country?: string;

@@ -1,4 +1,3 @@
-import { minorUnits, roundHalfUp } from "@/lib/ledger/money";
 import type { LedgerExpenseRow } from "@/lib/ledger/types";
 
 export type LedgerStatsInput = {
@@ -9,42 +8,15 @@ export type LedgerStatsInput = {
   today?: string;
 };
 
+const CAT_TO_BUDGET: Record<string, string> = {
+  식비: "food",
+  교통: "transport",
+  숙소: "hotel",
+  관광: "activity",
+};
+
 export function totalKrw(expenses: LedgerExpenseRow[]): number {
   return expenses.reduce((s, e) => s + e.krwAmount, 0);
-}
-
-export interface CurrencyTotal {
-  currency: string;
-  /** 원 통화 합계 (통화 최소 단위로 반올림) */
-  amount: number;
-  /** 같은 통화 지출의 원화 합계 (저장된 krwAmount 합) */
-  krw: number;
-  count: number;
-}
-
-/**
- * 통화별 합계. 표시 전용이며 환율을 다시 계산하지 않는다.
- * 모든 항목의 krw 합은 totalKrw(expenses) 와 항상 같다.
- * 정렬: 원화 합계 큰 순, 같으면 통화 코드 순.
- */
-export function totalsByCurrency(
-  expenses: LedgerExpenseRow[]
-): CurrencyTotal[] {
-  const map = new Map<string, CurrencyTotal>();
-  for (const e of expenses) {
-    const code = (e.currency || "KRW").trim().toUpperCase();
-    const cur = map.get(code) ?? { currency: code, amount: 0, krw: 0, count: 0 };
-    cur.amount += Number.isFinite(e.amount) ? e.amount : 0;
-    cur.krw += e.krwAmount;
-    cur.count += 1;
-    map.set(code, cur);
-  }
-  return [...map.values()]
-    .map((t) => {
-      const scale = 10 ** minorUnits(t.currency);
-      return { ...t, amount: roundHalfUp(t.amount * scale) / scale };
-    })
-    .sort((a, b) => b.krw - a.krw || a.currency.localeCompare(b.currency));
 }
 
 export function byDay(expenses: LedgerExpenseRow[]): Record<string, number> {
@@ -65,7 +37,7 @@ export function byCategory(expenses: LedgerExpenseRow[]): Record<string, number>
   return out;
 }
 
-function byPayer(expenses: LedgerExpenseRow[]): Record<string, number> {
+export function byPayer(expenses: LedgerExpenseRow[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const e of expenses) {
     out[e.paidBy] = (out[e.paidBy] ?? 0) + e.krwAmount;
@@ -73,7 +45,7 @@ function byPayer(expenses: LedgerExpenseRow[]): Record<string, number> {
   return out;
 }
 
-function owedByMember(
+export function owedByMember(
   expenses: LedgerExpenseRow[]
 ): Record<string, number> {
   const out: Record<string, number> = {};
@@ -104,7 +76,7 @@ export function dailyRecommended(p: {
   return Math.floor(p.remaining / daysLeft);
 }
 
-function pace(p: {
+export function pace(p: {
   spent: number;
   budget: number;
   today: string;
@@ -125,13 +97,77 @@ function pace(p: {
   return expected > 0 ? p.spent / expected : null;
 }
 
+export function categoryVsBudget(
+  expenses: LedgerExpenseRow[],
+  budgetAllocation: Record<string, number> | null | undefined,
+  totalBudget: number
+): Array<{ id: string; label: string; spent: number; budget: number; ratio: number }> {
+  const spent = byCategory(expenses);
+  const rows: Array<{
+    id: string;
+    label: string;
+    spent: number;
+    budget: number;
+    ratio: number;
+  }> = [];
+
+  const mapped = new Set<string>();
+  for (const [cat, bid] of Object.entries(CAT_TO_BUDGET)) {
+    mapped.add(cat);
+    const b = Number(budgetAllocation?.[bid] ?? 0);
+    const s = spent[cat] ?? 0;
+    rows.push({
+      id: bid,
+      label: cat,
+      spent: s,
+      budget: b,
+      ratio: b > 0 ? s / b : s > 0 ? Infinity : 0,
+    });
+  }
+
+  let otherSpent = 0;
+  for (const [cat, v] of Object.entries(spent)) {
+    if (!mapped.has(cat)) otherSpent += v;
+  }
+  rows.push({
+    id: "other",
+    label: "기타(예산 항목 없음)",
+    spent: otherSpent,
+    budget: 0,
+    ratio: otherSpent > 0 ? Infinity : 0,
+  });
+
+  void totalBudget;
+  return rows;
+}
+
+/** 남은 예산을 food/transport/activity 에 균등 재배분 제안 */
+export function rebalanceRemainingBudget(
+  remaining: number,
+  budgetAllocation: Record<string, number> | null | undefined
+): Record<string, number> {
+  const flexible = ["food", "transport", "activity"] as const;
+  const out: Record<string, number> = {};
+  if (!(remaining > 0)) {
+    for (const id of flexible) out[id] = 0;
+    return out;
+  }
+  const base = Math.floor(remaining / flexible.length);
+  let rem = remaining - base * flexible.length;
+  for (const id of flexible) {
+    const current = Number(budgetAllocation?.[id] ?? 0);
+    out[id] = current + base + (rem > 0 ? 1 : 0);
+    if (rem > 0) rem -= 1;
+  }
+  return out;
+}
+
 export function computeLedgerStats(input: LedgerStatsInput) {
   const today = input.today ?? new Date().toISOString().slice(0, 10);
   const spent = totalKrw(input.expenses);
   const remaining = remainingBudget(input.budget, spent);
   return {
     totalKrw: spent,
-    totalsByCurrency: totalsByCurrency(input.expenses),
     byDay: byDay(input.expenses),
     byCategory: byCategory(input.expenses),
     byPayer: byPayer(input.expenses),

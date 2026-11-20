@@ -2,7 +2,6 @@ import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { apiInternalError } from "@/lib/api/respond";
 import { processEvent } from "@/lib/agent/run";
 import { requireCronSecret } from "@/lib/security/guard";
 
@@ -19,7 +18,7 @@ async function runSweep(): Promise<NextResponse> {
   });
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   const ids = (Array.isArray(data) ? data : [])

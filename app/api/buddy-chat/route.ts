@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { readJsonLimited } from "@/lib/agent/body-limit";
 import { geminiText } from "@/lib/ai/gemini";
 import { guardApi } from "@/lib/security/guard";
 
@@ -39,9 +38,7 @@ export async function POST(request: Request) {
   const { clientKey } = guard;
 
   try {
-    const limited = await readJsonLimited(request, 32_768);
-    if (!limited.ok) return limited.response;
-    const body = limited.json as {
+    const body = (await request.json()) as {
       message?: string;
       history?: HistoryItem[];
     };

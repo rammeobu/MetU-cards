@@ -1,3 +1,4 @@
+import { MOCK_DEALS } from "@/lib/deals/data";
 import type { Trip } from "@/lib/trips/types";
 
 export type DocsCountryId =
@@ -286,6 +287,20 @@ function matchByCountryLabel(country: string): DocsCountryId | null {
   return null;
 }
 
+function matchByDealDestination(destination: string): DocsCountryId | null {
+  const primary = destination.split(/[,，·/]/)[0]?.trim() ?? destination.trim();
+  if (!primary) return null;
+
+  const deal = MOCK_DEALS.find(
+    (item) =>
+      primary.includes(item.name) ||
+      item.name.includes(primary) ||
+      normalizeText(primary).includes(normalizeText(item.name))
+  );
+  if (!deal) return null;
+  return COUNTRY_LABEL_TO_ID[normalizeText(deal.country)] ?? null;
+}
+
 /** 메인 홈 `진행 중인 여행`과 동일하게 첫 번째 활성 여행을 사용한다. */
 export function getPrimaryActiveTrip(trips: Trip[]): Trip | null {
   return trips[0] ?? null;
@@ -299,5 +314,8 @@ export function resolveDocsCountryFromTrip(
   const byCountry = matchByCountryLabel(trip.country);
   if (byCountry) return byCountry;
 
-  return matchByKeywords(source);
+  const byDestination = matchByKeywords(source);
+  if (byDestination) return byDestination;
+
+  return matchByDealDestination(trip.destination);
 }

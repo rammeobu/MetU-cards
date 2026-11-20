@@ -45,13 +45,13 @@ export type AiChatResponse = {
 
 // --- plan ---
 
-type PlanScheduleItemOut = {
+export type PlanScheduleItemOut = {
   time: string;
   title: string;
   detail: string;
 };
 
-type PlanDayScheduleOut = {
+export type PlanDayScheduleOut = {
   day: number;
   label: string;
   items: PlanScheduleItemOut[];
@@ -67,7 +67,7 @@ export type PlanItineraryOut = {
 
 // --- tips ---
 
-type TipItemOut = {
+export type TipItemOut = {
   emoji: string;
   title: string;
   description: string;
@@ -84,18 +84,14 @@ export type WeatherOut = {
 
 // --- deals ---
 
-type DealRowOut = {
-  name: string;
-  country: string;
-  bestMonth: string;
+export type DealRowOut = {
+  id: string;
   highlight: string;
-  /** 가성비 / 보통 / 프리미엄 (또는 value/standard/premium) */
-  tier: string;
 };
 
 export type DealsOut = { deals: DealRowOut[] };
 
-type DealEnrichOut = {
+export type DealEnrichOut = {
   summary: string;
   whyCheap: string[];
   budgetTips: string[];
@@ -122,7 +118,7 @@ function asStringList(value: unknown, max = 20): string[] {
     .slice(0, max);
 }
 
-function parseJsonContent(content: string): unknown | null {
+export function parseJsonContent(content: string): unknown | null {
   try {
     let text = content.trim();
     if (text.startsWith("```")) {
@@ -223,21 +219,13 @@ export function parseDealsOut(content: string): DealsOut | null {
   const root = asRecord(parseJsonContent(content));
   if (!root || !Array.isArray(root.deals)) return null;
   const deals: DealRowOut[] = [];
-  for (const row of root.deals.slice(0, 12)) {
+  for (const row of root.deals.slice(0, 20)) {
     const r = asRecord(row);
     if (!r) continue;
-    const name = asString(r.name);
-    const country = asString(r.country);
+    const id = asString(r.id);
     const highlight = asString(r.highlight);
-    if (!name || !country || !highlight) continue;
-    // Ignore any numeric price fields the model may invent — do not surface them
-    deals.push({
-      name,
-      country,
-      bestMonth: asString(r.bestMonth) || "",
-      highlight,
-      tier: asString(r.tier) || "보통",
-    });
+    if (!id || !highlight) continue;
+    deals.push({ id, highlight });
   }
   return deals.length > 0 ? { deals } : null;
 }
@@ -261,14 +249,14 @@ export type ItinerarySlot =
   | "dinner"
   | "evening";
 
-type ItineraryItemOut = {
+export type ItineraryItemOut = {
   placeId: string;
   slot: ItinerarySlot;
   durationMin: number;
   reason: string;
 };
 
-type ItineraryDayOut = {
+export type ItineraryDayOut = {
   day: number;
   theme: string;
   items: ItineraryItemOut[];
@@ -326,7 +314,7 @@ export function parseItinerary(content: string): ItineraryOut | null {
   return { summary: asString(root.summary) || "", days };
 }
 
-type PatchOpKind = "replace" | "remove" | "add" | "move";
+export type PatchOpKind = "replace" | "remove" | "add" | "move";
 
 export type PatchOp = {
   op: PatchOpKind;
@@ -554,17 +542,6 @@ export type ReceiptItemOut = {
   amount: number | null;
 };
 
-type ReceiptSecondaryAmountOut = {
-  label: string;
-  amount: number;
-  currency: string | null;
-};
-
-type ReceiptTaxFreeOut = {
-  eligible: boolean | null;
-  evidence: string | null;
-};
-
 export type ReceiptOut = {
   isReceipt: boolean;
   merchant: string | null;
@@ -576,9 +553,6 @@ export type ReceiptOut = {
   tax: number | null;
   tip: number | null;
   items: ReceiptItemOut[];
-  /** 영수증에 함께 인쇄된 다른 금액(다른 통화 병기 등). 환산값이 아니라 인쇄값만. */
-  secondaryAmounts: ReceiptSecondaryAmountOut[];
-  taxFree: ReceiptTaxFreeOut;
   category: ExpenseCategoryOut;
   paymentMethod: "card" | "cash" | "transfer" | null;
   language: string | null;
@@ -671,8 +645,6 @@ export function parseReceiptOut(content: string): ReceiptOut | null {
           ? null
           : Number(root.tip),
     items,
-    secondaryAmounts: [],
-    taxFree: { eligible: null, evidence: null },
     category,
     paymentMethod:
       pm === "card" || pm === "cash" || pm === "transfer" ? pm : null,

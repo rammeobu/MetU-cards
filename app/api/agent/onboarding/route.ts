@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { readJsonLimited } from "@/lib/agent/body-limit";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import {
+  MTU_ONB_COOKIE,
+  ONB_COOKIE_MAX_AGE_SEC,
+} from "@/lib/onboarding/constants";
+import { guardApi } from "@/lib/security/guard";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 export const maxDuration = 30;
@@ -17,19 +19,31 @@ const BodySchema = z.object({
     .optional(),
 });
 
+function withOnbCookie(response: NextResponse, status: string) {
+  response.cookies.set(MTU_ONB_COOKIE, status, {
+    httpOnly: false,
+    sameSite: "lax",
+    path: "/",
+    maxAge: ONB_COOKIE_MAX_AGE_SEC,
+  });
+  return response;
+}
+
 export async function POST(request: Request) {
   const guard = await guardApi(request, { bucket: "ledger-parse" });
   if (guard instanceof NextResponse) return guard;
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
-  const limited = await readJsonLimited(request, 4_096);
-  if (!limited.ok) return limited.response;
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid-json" }, { status: 400 });
+  }
 
-  const parsed = BodySchema.safeParse(limited.json);
+  const parsed = BodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "validation-failed" }, { status: 400 });
   }
@@ -43,8 +57,11 @@ export async function POST(request: Request) {
   });
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, status });
+  return withOnbCookie(
+    NextResponse.json({ ok: true, status }),
+    status
+  );
 }

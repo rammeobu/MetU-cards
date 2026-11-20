@@ -1,39 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Check, Pencil, Plane, Trash2, X } from "lucide-react";
-import { AutomationStatusBanner } from "@/components/home/AutomationStatusBanner";
+import { Check, Pencil, Trash2, X } from "lucide-react";
 import { MobileShell } from "@/components/layout/MobileShell";
 import { TripListCard } from "@/components/trips/TripListCard";
-import { useAuth } from "@/lib/auth/AuthProvider";
+import { VisitedWorldMap } from "@/components/trips/VisitedWorldMap";
 import { useTrips } from "@/lib/trips/TripProvider";
 
-const emptyCtaClass =
-  "mu-focus inline-flex h-14 w-full items-center justify-center rounded-mu-lg bg-mu-accent px-5 text-mu-body font-semibold text-mu-on-accent";
-
-const VisitedWorldMap = dynamic(
-  () =>
-    import("@/components/trips/VisitedWorldMap").then((m) => m.VisitedWorldMap),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        className="h-40 w-full animate-pulse rounded-2xl bg-mu-sunken"
-        aria-hidden
-      />
-    ),
-  }
-);
-
 export function TripsPageContent() {
-  const { isAnonymous, provider } = useAuth();
   const { trips, isReady, removeTrip } = useTrips();
   const [editMode, setEditMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const isGuest = provider === "guest";
-  const canCreateTrip = !isAnonymous && !isGuest;
 
   useEffect(() => {
     setSelectedIds((prev) =>
@@ -73,7 +51,6 @@ export function TripsPageContent() {
   return (
     <MobileShell>
       <div className="flex flex-col gap-4 px-5 pt-5">
-        {!editMode ? <AutomationStatusBanner ignoreFirstRun /> : null}
         {isReady && !editMode ? <VisitedWorldMap trips={trips} /> : null}
 
         <div className="flex items-start justify-between gap-3">
@@ -83,14 +60,14 @@ export function TripsPageContent() {
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="flex shrink-0 items-center gap-3 rounded-lg px-3 py-1 transition-colors active:bg-mu-sunken"
+                  className="flex shrink-0 items-center gap-3 rounded-lg px-3 py-1 transition-colors active:bg-surface-soft"
                 >
                   <span
                     className={[
                       "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition-colors",
                       allSelected
-                        ? "border-mu-accent bg-mu-accent text-mu-on-accent"
-                        : "border-mu-line bg-mu-card",
+                        ? "border-brand bg-brand text-surface-white"
+                        : "border-line-muted bg-surface-white",
                     ].join(" ")}
                     aria-hidden
                   >
@@ -98,7 +75,7 @@ export function TripsPageContent() {
                       <Check className="h-3.5 w-3.5" strokeWidth={3} />
                     )}
                   </span>
-                  <span className="text-sm font-semibold text-mu-fg-3">
+                  <span className="text-sm font-semibold text-ink-caption">
                     전체선택
                   </span>
                 </button>
@@ -113,8 +90,8 @@ export function TripsPageContent() {
                     selectedIds.length > 0 ? "선택한 여행 삭제" : "수정 취소"
                   }
                   className={[
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-mu-sunken",
-                    selectedIds.length > 0 ? "text-mu-err" : "text-mu-fg",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-surface-soft",
+                    selectedIds.length > 0 ? "text-danger" : "text-ink-heading",
                   ].join(" ")}
                 >
                   {selectedIds.length > 0 ? (
@@ -128,10 +105,10 @@ export function TripsPageContent() {
           ) : (
             <>
               <div className="min-w-0">
-                <h1 className="text-heading font-bold tracking-tight text-mu-fg">
+                <h1 className="text-heading font-bold tracking-tight text-ink-heading">
                   내 여행
                 </h1>
-                <p className="mt-1 text-sm text-mu-fg-3">
+                <p className="mt-1 text-sm text-ink-caption">
                   총 {trips.length}개의 여행 기록이 있어요.
                 </p>
               </div>
@@ -140,7 +117,7 @@ export function TripsPageContent() {
                   type="button"
                   onClick={() => setEditMode(true)}
                   aria-label="여행 목록 수정"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-mu-fg transition-colors active:bg-mu-sunken"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-heading transition-colors active:bg-surface-soft"
                 >
                   <Pencil className="h-4 w-4" strokeWidth={2.2} />
                 </button>
@@ -154,59 +131,34 @@ export function TripsPageContent() {
             {[1, 2].map((item) => (
               <div
                 key={item}
-                className="h-28 animate-pulse rounded-2xl bg-mu-sunken"
+                className="h-28 animate-pulse rounded-2xl bg-surface-soft"
               />
             ))}
           </div>
-        ) : isGuest ? (
-          <div className="flex flex-col items-center gap-4 rounded-2xl bg-mu-card px-5 py-12 text-center shadow-soft ring-1 ring-mu-line">
-            <p className="text-base font-extrabold text-mu-fg">
-              로그인하면 내 여행을 볼 수 있어요
-            </p>
-            <p className="text-sm leading-relaxed text-mu-fg-3">
-              여행·가계부가 기기에만 남지 않고 계정에 저장돼요.
-            </p>
-            <Link
-              href="/login?next=/trips"
-              className="inline-flex min-h-12 w-full max-w-xs items-center justify-center rounded-2xl bg-mu-accent px-6 text-sm font-bold text-mu-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-            >
-              로그인하기
-            </Link>
-          </div>
         ) : trips.length === 0 ? (
-          <div className="flex flex-col items-center gap-4 rounded-mu-xl border border-dashed border-mu-line bg-mu-card px-5 py-12 text-center">
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-brand/20 bg-gradient-to-b from-brand/5 to-surface-soft/40 px-5 py-14 text-center">
             <span
-              className="flex h-14 w-14 items-center justify-center rounded-mu-lg bg-mu-accent-soft text-mu-accent"
+              className="flex h-14 w-14 items-center justify-center rounded-2xl ai-gradient-bg text-2xl shadow-glow"
               aria-hidden
             >
-              <Plane className="h-7 w-7" strokeWidth={2.2} />
+              ✈
             </span>
             <div className="flex flex-col gap-1.5">
-              <p className="text-mu-body font-bold text-mu-fg">
+              <p className="text-base font-extrabold text-ink-heading">
                 아직 여행이 없어요
               </p>
-              <p className="text-mu-caption leading-relaxed text-mu-fg-3">
-                여행을 만들면 가계부와 알림 기록이 여행별로 모여요.
+              <p className="text-sm leading-relaxed text-ink-caption">
+                예산만 알려주면 AI가 맞춤 일정을 짜드려요.
+                <br />
+                첫 여행을 만들어 보세요.
               </p>
             </div>
-            <div className="mt-1 w-full max-w-xs">
-              {canCreateTrip ? (
-                <Link href="/onboarding" className={emptyCtaClass}>
-                  여행 만들기
-                </Link>
-              ) : isGuest ? (
-                <Link
-                  href={`/login?next=${encodeURIComponent("/trips")}`}
-                  className={emptyCtaClass}
-                >
-                  로그인하고 여행 만들기
-                </Link>
-              ) : (
-                <p className="text-center text-mu-caption text-mu-fg-3">
-                  초대 링크로 합류한 뒤에는 새 여행을 만들 수 없어요.
-                </p>
-              )}
-            </div>
+            <Link
+              href="/onboarding"
+              className="mt-1 rounded-2xl ai-gradient-bg px-6 py-3.5 text-sm font-bold text-surface-white shadow-glow transition-transform active:scale-[0.98]"
+            >
+              첫 여행 계획하기
+            </Link>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -231,8 +183,8 @@ export function TripsPageContent() {
               className={[
                 "flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold transition-colors",
                 selectedIds.length > 0
-                  ? "bg-mu-err text-mu-on-accent active:brightness-95"
-                  : "cursor-not-allowed bg-mu-sunken text-mu-fg-3",
+                  ? "bg-danger text-surface-white active:brightness-95"
+                  : "cursor-not-allowed bg-surface-soft text-ink-caption",
               ].join(" ")}
             >
               <Trash2 className="h-4 w-4" strokeWidth={2.4} />

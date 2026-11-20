@@ -2,20 +2,9 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  esbuild: {
-    jsx: "automatic",
-  },
   test: {
     environment: "node",
-    include: [
-      "lib/**/*.test.ts",
-      "lib/**/*.test.tsx",
-      "tests/**/*.test.ts",
-      "components/**/*.test.tsx",
-      "app/**/*.test.ts",
-      "app/**/*.test.tsx",
-      "scripts/**/*.test.mjs",
-    ],
+    include: ["lib/**/*.test.ts", "tests/**/*.test.ts"],
   },
   resolve: {
     alias: {

@@ -8,11 +8,10 @@ const PUBLIC_API_PREFIXES = [
   "/api/warmup",
   "/api/fx",
   "/api/destination-image",
-  "/api/places/autocomplete",
   "/api/onboarding/session",
+  "/api/recommended-deals",
   "/api/trip-tips",
   "/api/share-target",
-  "/api/recommended-deals",
   "/api/agent/sweep",
   "/api/agent/cron/",
 ] as const;

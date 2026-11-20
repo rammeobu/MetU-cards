@@ -1,16 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { ChevronRight, Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import { Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
-import { FxAttribution } from "@/components/fx/FxAttribution";
-import { CurrencyTotals } from "@/components/ledger/CurrencyTotals";
-import { FeeLeakCard } from "@/components/ledger/FeeLeakCard";
-import { ExpenseFlags } from "@/components/trips/ledger/ExpenseFlags";
-import { ExpenseFxLine } from "@/components/trips/ledger/ExpenseFxLine";
 import { MemberManager } from "@/components/trips/ledger/MemberManager";
-import { TripInvitePanel } from "@/components/trips/ledger/TripInvitePanel";
-import { totalsByCurrency } from "@/lib/ledger/stats";
 import { ExpenseForm, type ExpenseDraft } from "@/components/trips/ledger/ExpenseForm";
 import { NaturalExpenseInput } from "@/components/trips/ledger/NaturalExpenseInput";
 import type { ExpenseParseItemOut } from "@/lib/ai/contracts";
@@ -20,10 +12,6 @@ import { TripIconButton } from "@/components/trips/TripDetailParts";
 
 interface LedgerTabProps {
   readOnly?: boolean;
-  /** 초대 링크를 만들 여행 id. canInvite 와 함께 주면 초대 패널이 보여요. */
-  tripId?: string;
-  /** 여행 소유자만 true. 합류한 동행자에게는 초대 버튼을 보여주지 않아요. */
-  canInvite?: boolean;
   loading?: boolean;
   error?: string;
   members: TripMember[];
@@ -44,14 +32,10 @@ interface LedgerTabProps {
     parseMeta?: ExpenseParseItemOut
   ) => Promise<boolean>;
   onDeleteExpense?: (id: string) => Promise<boolean>;
-  /** 청구액 반영·되돌리기 후 목록 갱신 */
-  onExpenseFxChanged?: () => void;
 }
 
 export function LedgerTab({
   readOnly,
-  tripId,
-  canInvite,
   loading,
   error,
   members,
@@ -65,7 +49,6 @@ export function LedgerTab({
   onRemoveMember,
   onSaveExpense,
   onDeleteExpense,
-  onExpenseFxChanged,
 }: LedgerTabProps) {
   const [mode, setMode] = useState<"list" | "manual" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -74,12 +57,6 @@ export function LedgerTab({
     const map = new Map(members.map((m) => [m.id, m.displayName]));
     return (id: string) => map.get(id) ?? "?";
   }, [members]);
-
-  const currencyTotals = useMemo(() => totalsByCurrency(expenses), [expenses]);
-  const hasForeign = useMemo(
-    () => expenses.some((e) => e.currency.trim().toUpperCase() !== "KRW"),
-    [expenses]
-  );
 
   if (loading) {
     return (
@@ -107,25 +84,6 @@ export function LedgerTab({
         <h3 className="text-lg font-extrabold text-ink-heading">함께 쓰는 가계부</h3>
       </div>
 
-      {tripId ? (
-        <Link
-          href={`/trips/${tripId}/ledger`}
-          className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-mu-line bg-mu-sunken px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-        >
-          <div className="min-w-0">
-            <p className="text-sm font-extrabold text-mu-fg">정산 여정 열기</p>
-            <p className="mt-0.5 text-xs leading-5 text-mu-fg-2">
-              연결·초대·기록·정산을 단계로 이어가요
-            </p>
-          </div>
-          <ChevronRight
-            className="h-5 w-5 shrink-0 text-mu-fg-3"
-            strokeWidth={1.75}
-            aria-hidden
-          />
-        </Link>
-      ) : null}
-
       {error ? (
         <p className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
           {error}
@@ -139,24 +97,10 @@ export function LedgerTab({
         onRemove={onRemoveMember}
       />
 
-      {tripId && !readOnly ? (
-        <TripInvitePanel
-          tripId={tripId}
-          members={members}
-          canInvite={Boolean(canInvite)}
-        />
-      ) : null}
-
       <div className="rounded-xl bg-surface-soft px-3 py-2">
         <p className="text-xs text-ink-caption">총 지출 (원화)</p>
         <p className="text-xl font-extrabold text-ink-heading">{formatKRW(totalKrw)}</p>
       </div>
-      <CurrencyTotals
-        totals={currencyTotals}
-        totalKrw={totalKrw}
-        className="rounded-xl border border-line-soft px-3 py-2"
-      />
-      <FeeLeakCard expenses={expenses} />
 
       {!readOnly && meId ? (
         <>
@@ -224,9 +168,8 @@ export function LedgerTab({
             ) : (
               <div
                 key={exp.id}
-                className="flex flex-col rounded-2xl border border-line-soft bg-surface-white px-3 py-3"
+                className="flex items-center gap-2 rounded-2xl border border-line-soft bg-surface-white px-3 py-3"
               >
-              <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-bold text-ink-heading">
                     {exp.label}
@@ -261,13 +204,9 @@ export function LedgerTab({
                   </>
                 ) : null}
               </div>
-              <ExpenseFxLine expense={exp} onChanged={onExpenseFxChanged} />
-              <ExpenseFlags flags={exp.flags} />
-              </div>
             )
           )
         )}
-        {hasForeign ? <FxAttribution /> : null}
       </div>
 
       {members.length > 0 && settlement.transfers.length > 0 ? (

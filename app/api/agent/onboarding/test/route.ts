@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { runIngest } from "@/lib/agent/ingest-pipeline";
-import { touchServerTestAt } from "@/lib/onboarding/agent-context";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { createEvent } from "@/lib/agent/ingest";
+import {
+  pickTripForAutomationTest,
+  touchServerTestAt,
+} from "@/lib/onboarding/agent-context";
+import { guardApi } from "@/lib/security/guard";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 
 export const maxDuration = 30;
@@ -17,8 +19,6 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const rate = checkRateLimit(
     `onboarding-test:${guard.identity.userId}`,
@@ -37,17 +37,17 @@ export async function POST(request: Request) {
   }
 
   const userId = guard.identity.userId;
-  // 서버 확인은 여행과 무관해요. 날짜를 무시하고 아무 여행에 붙이지 않고 tripId 는 항상 null.
-  // 이 결과는 "폰 연결됨" 표시에 쓰지 않아요(source "sim" 은 연결 확인에서 제외).
+  // Trip is optional — connection test only needs an event row.
+  const tripId = await pickTripForAutomationTest(userId);
 
   const bucket = new Date().toISOString().slice(0, 16);
   const idempotencyKey = createHash("sha256")
     .update(`onboarding-server-test|${userId}|${bucket}`, "utf8")
     .digest("hex");
 
-  const outcome = await runIngest({
+  const created = await createEvent({
     userId,
-    tripId: null,
+    tripId,
     source: "sim",
     kind: "text",
     payload: {
@@ -57,11 +57,10 @@ export async function POST(request: Request) {
       received_at: new Date().toISOString(),
     },
     idempotencyKey,
-    processIfTrip: false,
   });
 
-  if (!outcome.result.ok) {
-    return apiInternalError(outcome.result.error);
+  if (!created.ok) {
+    return NextResponse.json({ error: created.error }, { status: 500 });
   }
 
   const admin = getAgentAdmin();
@@ -73,7 +72,7 @@ export async function POST(request: Request) {
         result: { test: true, via: "server" },
         processed_at: new Date().toISOString(),
       })
-      .eq("id", outcome.result.id)
+      .eq("id", created.id)
       .eq("user_id", userId);
   }
 
@@ -81,7 +80,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    eventId: outcome.result.id,
-    duplicate: outcome.result.duplicate,
+    eventId: created.id,
+    duplicate: created.duplicate,
   });
 }

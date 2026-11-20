@@ -19,14 +19,9 @@ export const TABLES = {
   tripMembers: "trip_members",
   tripInvites: "trip_invites",
   ledgerCardProfiles: "ledger_card_profiles",
-  ledgerPayoutProfiles: "ledger_payout_profiles",
   tripExpenses: "trip_expenses",
   tripExpenseShares: "trip_expense_shares",
-  tripExpenseSplitHistory: "trip_expense_split_history",
-  tripExpenseProposals: "trip_expense_proposals",
   tripCashRates: "trip_cash_rates",
-  tripBotProposals: "trip_bot_proposals",
-  tripSuggestions: "trip_suggestions",
   fxRates: "fx_rates",
   tripSettlements: "trip_settlements",
   tripSettlementTransfers: "trip_settlement_transfers",
@@ -42,8 +37,6 @@ export const STORAGE_KEYS = {
   guestAuthorId: "budgettrip-guest-author-id",
   docsChecklist: "budgettrip-docs-checklist",
   countryMemories: "budgettrip-country-memories",
-  /** 가계부 탭(/agent)에서 마지막으로 고른 여행 id */
-  ledgerSelectedTrip: "budgettrip-ledger-selected-trip",
 } as const;
 
 /** App defaults */

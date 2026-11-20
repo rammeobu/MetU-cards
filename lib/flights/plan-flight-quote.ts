@@ -29,10 +29,7 @@ function buildEstimateQuote(plan: TripRecommendation): PlanFlightQuote | null {
   const destCode = resolveIataCode(plan.form.destination || plan.destination);
   if (!originCode || !destCode) return null;
 
-  const { departDate, returnDate } = resolveTripFlightDates(
-    plan.form,
-    plan.nights
-  );
+  const { departDate, returnDate } = resolveTripFlightDates(plan.form, plan.nights);
   const googleFlightsUrl =
     buildGoogleFlightsUrlFromPlan(plan) ??
     buildGoogleFlightsSearchUrl({
@@ -43,8 +40,6 @@ function buildEstimateQuote(plan: TripRecommendation): PlanFlightQuote | null {
       adults: plan.people,
     });
 
-  // 클라이언트 번들에서 server-only FX 를 끌어오지 않는다.
-  // 계획 금액은 KRW 정수로 취급(×1500 휴리스틱 제거).
   const priceKrw = normalizePriceToKrw(plan.flight.price);
   return {
     priceKrw,

@@ -3,7 +3,6 @@ import { TABLES } from "@/lib/constants";
 import { dedupeHash } from "@/lib/ledger/dedupe";
 import { computeKrw } from "@/lib/ledger/money";
 import { computeShares, splitEqual } from "@/lib/ledger/settle";
-import { parseSharedSettlementDetail } from "@/lib/ledger/shared-settlement";
 import {
   expenseToInsert,
   rowToExpense,
@@ -40,7 +39,7 @@ function memberFromRow(row: MemberRow): TripMember {
 
 const MEMBER_COLS = "id, trip_id, display_name, is_owner, role, user_id";
 const EXPENSE_COLS =
-  "id, trip_id, created_by, paid_by, label, merchant, merchant_ko, category, amount, currency, payment_method, card_profile_id, card_label, fx_rate_to_krw, fx_rate, fx_rate_date, fx_source, fx_is_fallback, fee_rate, fee_flat_krw, krw_base, fee_krw, krw_amount, source, items, place_id, spent_on, paid_at, day_index, split_type, dedupe_hash, note, billed_krw, billed_source, billed_event_id, fx_merge, agent_reasons, tax_free, tax_excl_amount, receipt_path";
+  "id, trip_id, created_by, paid_by, label, merchant, merchant_ko, category, amount, currency, payment_method, card_profile_id, card_label, fx_rate_to_krw, fx_rate, fx_rate_date, fx_source, fx_is_fallback, fee_rate, fee_flat_krw, krw_base, fee_krw, krw_amount, source, items, place_id, spent_on, paid_at, day_index, split_type, dedupe_hash, note";
 
 export type LedgerSnapshot = {
   members: TripMember[];
@@ -112,184 +111,6 @@ export async function listExpenses(
   );
 }
 
-/** 취소(void)된 지출 id. 정산 계산에서 제외해야 서버 자동 정산과 기준이 같다. 실패하면 null. */
-export async function listVoidedExpenseIds(
-  supabase: SupabaseClient,
-  tripId: string
-): Promise<Set<string> | null> {
-  const { data, error } = await supabase
-    .from(TABLES.tripExpenses)
-    .select("id")
-    .eq("trip_id", tripId)
-    .eq("status", "voided");
-  if (error) {
-    console.error("[listVoidedExpenseIds]", error.message);
-    return null;
-  }
-  return new Set((data ?? []).map((r) => String((r as { id: string }).id)));
-}
-
-export type SettlementStatus = "open" | "stale" | "completed" | "superseded";
-
-interface SettlementTransfer {
-  id: string;
-  from: string;
-  to: string;
-  krw: number;
-  status: "pending" | "paid";
-}
-
-export interface SettlementSnapshot {
-  id: string;
-  version: number;
-  status: SettlementStatus;
-  origin: "manual" | "auto";
-  basisHash: string;
-  shareToken: string | null;
-  transfers: SettlementTransfer[];
-}
-
-interface SettlementRowDb {
-  id: string;
-  version: number | string;
-  status: string;
-  origin?: string | null;
-  basis_hash: string;
-  share_token: string | null;
-}
-
-interface SettlementTransferRowDb {
-  id: string;
-  from_member: string;
-  to_member: string;
-  krw: number | string;
-  status: string;
-}
-
-const SETTLEMENT_COLS = "id, version, status, origin, basis_hash, share_token";
-const SETTLEMENT_TRANSFER_COLS = "id, from_member, to_member, krw, status";
-
-/** DB 행 → 앱 타입. 결정적 순서(보내는 사람, 받는 사람, 금액)로 정렬한다. */
-export function settlementFromRows(
-  row: SettlementRowDb,
-  transferRows: SettlementTransferRowDb[]
-): SettlementSnapshot {
-  const transfers: SettlementTransfer[] = transferRows
-    .map((t) => ({
-      id: t.id,
-      from: t.from_member,
-      to: t.to_member,
-      krw: Number(t.krw),
-      status: t.status === "paid" ? ("paid" as const) : ("pending" as const),
-    }))
-    .sort((a, b) => {
-      if (a.from !== b.from) return a.from < b.from ? -1 : 1;
-      if (a.to !== b.to) return a.to < b.to ? -1 : 1;
-      return a.krw - b.krw;
-    });
-
-  return {
-    id: row.id,
-    version: Number(row.version),
-    status: row.status as SettlementStatus,
-    origin: row.origin === "auto" ? "auto" : "manual",
-    basisHash: row.basis_hash,
-    shareToken: row.share_token ?? null,
-    transfers,
-  };
-}
-
-export type LatestSettlementResult =
-  | { ok: true; settlement: SettlementSnapshot | null }
-  | { ok: false };
-
-/**
- * 가장 최근(superseded 제외) 정산과 송금 목록을 읽는다. RLS: 여행 멤버만 조회 가능.
- * 자동 정산(origin='auto')도 같은 테이블이라 함께 읽힌다.
- */
-export async function fetchLatestSettlement(
-  supabase: SupabaseClient,
-  tripId: string
-): Promise<LatestSettlementResult> {
-  const { data: row, error } = await supabase
-    .from(TABLES.tripSettlements)
-    .select(SETTLEMENT_COLS)
-    .eq("trip_id", tripId)
-    .neq("status", "superseded")
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.error("[fetchLatestSettlement]", error.message);
-    return { ok: false };
-  }
-  if (!row) return { ok: true, settlement: null };
-
-  const settlementRow = row as SettlementRowDb;
-  const { data: transferRows, error: transferErr } = await supabase
-    .from(TABLES.tripSettlementTransfers)
-    .select(SETTLEMENT_TRANSFER_COLS)
-    .eq("settlement_id", settlementRow.id);
-  if (transferErr) {
-    console.error("[fetchLatestSettlement:transfers]", transferErr.message);
-    return { ok: false };
-  }
-
-  return {
-    ok: true,
-    settlement: settlementFromRows(
-      settlementRow,
-      (transferRows ?? []) as SettlementTransferRowDb[]
-    ),
-  };
-}
-
-export interface SettlementHistoryItem {
-  id: string;
-  version: number;
-  status: SettlementStatus;
-  origin: "manual" | "auto";
-  shareToken: string | null;
-  createdAt: string | null;
-}
-
-interface SettlementHistoryRowDb {
-  id: string;
-  version: number | string;
-  status: string;
-  origin?: string | null;
-  share_token: string | null;
-  created_at?: string | null;
-}
-
-/**
- * 이 여행의 정산 버전 목록(최신 먼저, 최대 20개). 이전 버전의 공유 링크를 다시 보내는 데 쓴다.
- * RLS: 여행 멤버만 조회 가능. 실패하면 null.
- */
-export async function fetchSettlementHistory(
-  supabase: SupabaseClient,
-  tripId: string
-): Promise<SettlementHistoryItem[] | null> {
-  const { data, error } = await supabase
-    .from(TABLES.tripSettlements)
-    .select("id, version, status, origin, share_token, created_at")
-    .eq("trip_id", tripId)
-    .order("version", { ascending: false })
-    .limit(20);
-  if (error) {
-    console.error("[fetchSettlementHistory]", error.message);
-    return null;
-  }
-  return ((data ?? []) as SettlementHistoryRowDb[]).map((r) => ({
-    id: r.id,
-    version: Number(r.version),
-    status: r.status as SettlementStatus,
-    origin: r.origin === "auto" ? "auto" : "manual",
-    shareToken: r.share_token ?? null,
-    createdAt: r.created_at ?? null,
-  }));
-}
-
 export async function fetchLedger(
   supabase: SupabaseClient,
   tripId: string
@@ -340,6 +161,14 @@ export async function ensureOwnerMember(
 
   if (error || !data) return null;
   return memberFromRow(data as MemberRow);
+}
+
+export async function addVirtualMember(
+  supabase: SupabaseClient,
+  tripId: string,
+  name: string
+): Promise<TripMember | null> {
+  return addTripMember(supabase, tripId, name);
 }
 
 export async function addTripMember(
@@ -484,65 +313,26 @@ export async function updateExpense(
   const shares = resolveShares(input, memberIds);
   const merchant = input.label;
 
-  // K1: billed 가 있으면 금액·통화가 같으면 청구 병합을 보존하고,
-  // 금액·통화가 바뀌면 병합을 해제한다 (fee_krw:0 / krw_base=krwAmount 덮어쓰기 방지).
-  const { data: before, error: beforeErr } = await supabase
-    .from(TABLES.tripExpenses)
-    .select(
-      "amount, currency, billed_krw, billed_source, billed_event_id, fx_merge, krw_base, fee_krw, krw_amount"
-    )
-    .eq("id", expenseId)
-    .maybeSingle();
-  if (beforeErr || !before) return null;
-
-  const hadBilled =
-    before.billed_krw != null && Number(before.billed_krw) > 0;
-  const amountSame = Number(before.amount) === Number(input.amount);
-  const currencySame =
-    String(before.currency ?? "").toUpperCase() ===
-    String(input.currency ?? "").toUpperCase();
-  const preserveBilled = hadBilled && amountSame && currencySame;
-  const clearBilled = hadBilled && !(amountSame && currencySame);
-
-  const patch: Record<string, unknown> = {
-    paid_by: input.paidBy,
-    label: merchant,
-    merchant,
-    category: input.category,
-    amount: input.amount,
-    currency: input.currency,
-    fx_rate_to_krw: input.fxRateToKrw,
-    fx_rate: input.fxRateToKrw,
-    place_id: input.placeId ?? null,
-    spent_on: input.spentOn ?? null,
-    day_index: input.dayIndex ?? null,
-    split_type: input.splitType === "custom" ? "fixed" : input.splitType,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (preserveBilled) {
-    patch.krw_base = before.krw_base;
-    patch.fee_krw = before.fee_krw;
-    patch.krw_amount = before.krw_amount;
-    patch.billed_krw = before.billed_krw;
-    patch.billed_source = before.billed_source;
-    patch.billed_event_id = before.billed_event_id;
-    patch.fx_merge = before.fx_merge;
-  } else {
-    patch.krw_base = input.krwAmount;
-    patch.fee_krw = 0;
-    patch.krw_amount = input.krwAmount;
-    if (clearBilled) {
-      patch.billed_krw = null;
-      patch.billed_source = null;
-      patch.billed_event_id = null;
-      patch.fx_merge = null;
-    }
-  }
-
   const { data: expense, error: expErr } = await supabase
     .from(TABLES.tripExpenses)
-    .update(patch)
+    .update({
+      paid_by: input.paidBy,
+      label: merchant,
+      merchant,
+      category: input.category,
+      amount: input.amount,
+      currency: input.currency,
+      fx_rate_to_krw: input.fxRateToKrw,
+      fx_rate: input.fxRateToKrw,
+      krw_base: input.krwAmount,
+      fee_krw: 0,
+      krw_amount: input.krwAmount,
+      place_id: input.placeId ?? null,
+      spent_on: input.spentOn ?? null,
+      day_index: input.dayIndex ?? null,
+      split_type: input.splitType === "custom" ? "fixed" : input.splitType,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", expenseId)
     .select(EXPENSE_COLS)
     .single();
@@ -683,6 +473,13 @@ export async function saveExpense(
   return expenses.find((e) => e.id === id) ?? null;
 }
 
+export async function deleteExpense(
+  supabase: SupabaseClient,
+  id: string
+): Promise<boolean> {
+  return deleteLedgerExpense(supabase, id);
+}
+
 export async function deleteLedgerExpense(
   supabase: SupabaseClient,
   expenseId: string
@@ -694,7 +491,7 @@ export async function deleteLedgerExpense(
   return !error;
 }
 
-async function syncTripSpent(
+export async function syncTripSpent(
   supabase: SupabaseClient,
   tripId: string
 ): Promise<void> {
@@ -717,63 +514,6 @@ export async function listCardProfiles(supabase: SupabaseClient) {
     .order("created_at", { ascending: true });
   if (error) return [];
   return data ?? [];
-}
-
-/** 호스트 전용. 금액·분담 불변, RPC만. */
-export async function setExpensePayer(
-  supabase: SupabaseClient,
-  expenseId: string,
-  memberId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { error } = await supabase.rpc("set_expense_payer", {
-    p_expense_id: expenseId,
-    p_member_id: memberId,
-  });
-  if (!error) return { ok: true };
-  const msg = error.message ?? "";
-  if (msg.includes("forbidden")) {
-    return { ok: false, error: "호스트만 바꿀 수 있어요." };
-  }
-  if (msg.includes("voided")) {
-    return { ok: false, error: "취소된 지출은 바꿀 수 없어요." };
-  }
-  if (msg.includes("bad-member")) {
-    return { ok: false, error: "이 여행의 멤버가 아니에요." };
-  }
-  if (msg.includes("not-found")) {
-    return { ok: false, error: "지출을 찾지 못했어요." };
-  }
-  return { ok: false, error: "결제자를 바꾸지 못했어요." };
-}
-
-/** 현재 호스트만. 가입된 멤버(user_id 있음)에게 trips.user_id·멤버 role 을 넘긴다. */
-export async function transferTripHost(
-  supabase: SupabaseClient,
-  tripId: string,
-  newOwnerMemberId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { error } = await supabase.rpc("transfer_trip_host", {
-    p_trip_id: tripId,
-    p_new_owner_member_id: newOwnerMemberId,
-  });
-  if (!error) return { ok: true };
-  const msg = error.message ?? "";
-  if (msg.includes("forbidden")) {
-    return { ok: false, error: "호스트만 넘길 수 있어요." };
-  }
-  if (msg.includes("guest-cannot-host")) {
-    return { ok: false, error: "아직 가입하지 않은 동행에게는 넘길 수 없어요." };
-  }
-  if (msg.includes("already-owner")) {
-    return { ok: false, error: "이미 호스트예요." };
-  }
-  if (msg.includes("bad-member") || msg.includes("bad-args")) {
-    return { ok: false, error: "넘길 동행을 확인해 주세요." };
-  }
-  if (msg.includes("not-found")) {
-    return { ok: false, error: "여행을 찾지 못했어요." };
-  }
-  return { ok: false, error: "호스트를 넘기지 못했어요." };
 }
 
 export async function upsertCardProfile(
@@ -806,47 +546,6 @@ export async function upsertCardProfile(
   return data;
 }
 
-export type PayoutProfileRow = {
-  user_id: string;
-  bank: string;
-  account_no: string;
-  updated_at: string;
-};
-
-export async function getPayoutProfile(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<PayoutProfileRow | null> {
-  const { data, error } = await supabase
-    .from(TABLES.ledgerPayoutProfiles)
-    .select("user_id, bank, account_no, updated_at")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error || !data) return null;
-  return data as PayoutProfileRow;
-}
-
-export async function upsertPayoutProfile(
-  supabase: SupabaseClient,
-  input: { userId: string; bank: string; accountNo: string }
-): Promise<PayoutProfileRow | null> {
-  const bank = input.bank.trim().slice(0, 40);
-  const accountNo = input.accountNo.trim().slice(0, 64);
-  if (!bank || accountNo.replace(/[^0-9]/g, "").length < 4) return null;
-  const { data, error } = await supabase
-    .from(TABLES.ledgerPayoutProfiles)
-    .upsert({
-      user_id: input.userId,
-      bank,
-      account_no: accountNo,
-      updated_at: new Date().toISOString(),
-    })
-    .select("user_id, bank, account_no, updated_at")
-    .single();
-  if (error || !data) return null;
-  return data as PayoutProfileRow;
-}
-
 export async function upsertCashRate(
   supabase: SupabaseClient,
   p: {
@@ -877,38 +576,7 @@ export async function fetchSharedLedger(
   supabase: SupabaseClient,
   token: string
 ): Promise<LedgerSnapshot | null> {
-  // 1) 정산 공유 상세(이체 + 지출 내역). RPC 가 없거나 토큰이 아니면 다음 단계로.
-  const detailRes = await supabase.rpc("get_shared_settlement_detail", {
-    p_token: token,
-  });
-  if (!detailRes.error && detailRes.data) {
-    const detail = parseSharedSettlementDetail(detailRes.data);
-    if (detail) {
-      const members: TripMember[] = detail.members.map((m) => ({
-        id: m.id,
-        tripId: "",
-        displayName: m.displayName,
-        isOwner: false,
-      }));
-      const expenses: LedgerExpenseRow[] = detail.expenses.map((e) => ({
-        id: e.id,
-        tripId: "",
-        paidBy: e.paidBy,
-        label: e.label,
-        category: e.category,
-        amount: e.amount,
-        currency: e.currency,
-        fxRateToKrw: e.fxRateToKrw ?? 1,
-        krwAmount: e.krwAmount,
-        spentOn: e.spentOn ?? undefined,
-        splitType: "equal",
-        shares: {},
-      }));
-      return { members, expenses };
-    }
-  }
-
-  // 2) 상세 RPC 가 아직 없을 때: 멤버만 있는 기존 정산 공유.
+  // L-1A: prefer get_shared_settlement; fall back to legacy get_shared_ledger
   const settlement = await supabase.rpc("get_shared_settlement", {
     p_token: token,
   });

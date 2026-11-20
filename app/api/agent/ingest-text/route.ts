@@ -1,20 +1,16 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { readJsonLimited } from "@/lib/agent/body-limit";
 import {
   buildSmsPayload,
+  createEvent,
   defaultSmsIdempotencyKey,
 } from "@/lib/agent/ingest";
-import { runIngest } from "@/lib/agent/ingest-pipeline";
+import { processEvent } from "@/lib/agent/run";
 import { assertTripMember } from "@/lib/agent/membership";
-import { apiInternalError } from "@/lib/api/respond";
-import {
-  pickTripForReceivedAt,
-  type TripPick,
-} from "@/lib/onboarding/agent-context";
-import { tripPickToResult } from "@/lib/onboarding/trip-match";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { pickTripForReceivedAt } from "@/lib/onboarding/agent-context";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -32,13 +28,15 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
-  const limited = await readJsonLimited(request, 8_192);
-  if (!limited.ok) return limited.response;
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid-json" }, { status: 400 });
+  }
 
-  const parsed = BodySchema.safeParse(limited.json);
+  const parsed = BodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "validation-failed" }, { status: 400 });
   }
@@ -56,7 +54,6 @@ export async function POST(request: Request) {
 
   let tripId: string | null =
     parsed.data.tripId === undefined ? null : parsed.data.tripId;
-  let pick: TripPick | null = null;
 
   if (tripId) {
     const member = await assertTripMember(userId, tripId);
@@ -64,11 +61,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
   } else {
-    pick = await pickTripForReceivedAt(userId, receivedAt);
-    tripId = pick.tripId;
+    tripId = await pickTripForReceivedAt(userId, receivedAt);
   }
 
-  const outcome = await runIngest({
+  const created = await createEvent({
     userId,
     tripId,
     source: "share",
@@ -76,34 +72,31 @@ export async function POST(request: Request) {
     payload,
     idempotencyKey: `${userId}:${idempotencyKey}`,
     status: tripId ? "received" : "unassigned",
-    // 날짜 규칙으로 붙인 경우만 match.rule 저장 (명시한 tripId 는 확정으로 본다).
-    ...(pick ? { result: tripPickToResult(pick) } : {}),
   });
 
-  if (!outcome.result.ok) {
-    return apiInternalError(outcome.result.error);
+  if (!created.ok) {
+    return NextResponse.json({ error: created.error }, { status: 500 });
   }
 
-  if (outcome.result.duplicate) {
+  if (created.duplicate) {
     return NextResponse.json(
-      {
-        eventId: outcome.result.id,
-        duplicate: true,
-        status: tripId ? "received" : "unassigned",
-      },
+      { eventId: created.id, duplicate: true, status: tripId ? "received" : "unassigned" },
       { status: 200 }
     );
   }
 
   if (tripId) {
+    after(() => {
+      void processEvent(created.id);
+    });
     return NextResponse.json(
-      { eventId: outcome.result.id, status: "received", tripId },
+      { eventId: created.id, status: "received", tripId },
       { status: 202 }
     );
   }
 
   return NextResponse.json(
-    { eventId: outcome.result.id, status: "unassigned", tripId: null },
+    { eventId: created.id, status: "unassigned", tripId: null },
     { status: 200 }
   );
 }

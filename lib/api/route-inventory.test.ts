@@ -11,15 +11,12 @@ const ALLOWLIST: Record<string, string> = {
   "fx/route.ts": "public FX read proxy (legacy); no write",
   "destination-image/route.ts": "public destination thumbnail proxy",
   "onboarding/session/route.ts": "onboarding bootstrap; guest-safe session mint",
+  "recommended-deals/route.ts": "public deals listing",
   "trip-tips/route.ts": "legacy tips proxy; read-only",
   "account/delete/route.ts": "uses getUser() + service role; pre-guardApi pattern",
   "users/[id]/route.ts": "profile read with own getUser check",
   "users/batch/route.ts": "profile batch with own getUser check",
   "share-target/route.ts": "PWA share_target POST redirect; no secrets",
-  "places/autocomplete/route.ts":
-    "public Travelpayouts autocomplete proxy; IP rate-limited, no user data write",
-  "recommended-deals/route.ts":
-    "public home deals curation; IP rate-limited, read-only (api_cache via admin)",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

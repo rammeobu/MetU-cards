@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -18,8 +17,6 @@ export async function DELETE(
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const { id } = await context.params;
   if (!IdSchema.safeParse(id).success) {
@@ -41,7 +38,7 @@ export async function DELETE(
     .maybeSingle();
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!data) {
     return NextResponse.json({ error: "not-found" }, { status: 404 });

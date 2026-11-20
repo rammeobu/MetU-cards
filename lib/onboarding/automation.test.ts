@@ -117,44 +117,6 @@ describe("computeAutomationState", () => {
     ).toBe("silent");
   });
 
-  it("done + no timestamps but hasRecentEvent -> ok", () => {
-    expect(
-      computeAutomationState({
-        status: "done",
-        hasActiveToken: true,
-        activeTrip: false,
-        lastNotificationAt: null,
-        lastDeviceTestAt: null,
-        hasRecentEvent: true,
-        now: NOW,
-      })
-    ).toBe("ok");
-  });
-
-  it("partial + hasRecentEvent only -> unverified", () => {
-    expect(
-      computeAutomationState({
-        status: "partial",
-        hasActiveToken: true,
-        activeTrip: false,
-        hasRecentEvent: true,
-        now: NOW,
-      })
-    ).toBe("unverified");
-  });
-
-  it("partial + lastDeviceTestAt -> ok", () => {
-    expect(
-      computeAutomationState({
-        status: "partial",
-        hasActiveToken: true,
-        activeTrip: false,
-        lastDeviceTestAt: new Date(NOW - H).toISOString(),
-        now: NOW,
-      })
-    ).toBe("ok");
-  });
-
   it("done + active trip + fresh notification -> ok", () => {
     expect(
       computeAutomationState({

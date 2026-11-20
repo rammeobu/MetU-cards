@@ -1,134 +1,184 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Bot,
+  CircleUserRound,
   Home,
-  Inbox,
+  MessageSquareText,
   Route,
   type LucideIcon,
 } from "lucide-react";
-import { INBOX_NAME } from "@/lib/ledger/inbox-copy";
-import { useUnassignedInboxCount } from "@/lib/ledger/use-unassigned-inbox-count";
+import {
+  useCommunityActions,
+  useCommunityState,
+} from "@/lib/community/CommunityProvider";
+import { useChatRoomSummaries } from "@/lib/community/useChatRoomSummaries";
 
 interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  exact?: boolean;
-  /** 확인함 미배정 배지 */
-  badge?: boolean;
 }
 
-/**
- * 하단 3탭: 여행 · 홈 · 확인함.
- * 내 정보는 상단 바 우측(`ProfileTopButton`).
- */
-const NAV_ITEMS: NavItem[] = [
-  { href: "/trips", label: "여행", icon: Route },
-  { href: "/", label: "홈", icon: Home, exact: true },
-  { href: "/agent/inbox", label: INBOX_NAME, icon: Inbox, badge: true },
+const LEFT_ITEMS: NavItem[] = [
+  { href: "/trips", label: "내 여행", icon: Route },
+  { href: "/agent", label: "Agent", icon: Bot },
 ];
 
-function isActive(pathname: string, item: NavItem) {
-  if (item.exact) {
-    return pathname === item.href;
-  }
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+const RIGHT_ITEMS: NavItem[] = [
+  { href: "/opod", label: "멧톡", icon: MessageSquareText },
+  { href: "/profile", label: "프로필", icon: CircleUserRound },
+];
+
+const HOME_ITEM: NavItem = { href: "/", label: "홈", icon: Home };
+
+function isActive(pathname: string, href: string) {
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
 function NavIcon({
   icon: Icon,
   active,
-  badgeCount,
+  size = "md",
 }: {
   icon: LucideIcon;
   active: boolean;
-  badgeCount?: number;
+  size?: "md" | "lg";
 }) {
+  const iconClass = size === "lg" ? "h-5 w-5" : "h-4 w-4";
+
   return (
     <span
       className={[
-        "relative flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-mu",
-        active ? "bg-mu-accent-soft" : "bg-transparent",
+        "relative flex items-center justify-center transition-all duration-200",
+        size === "md" ? "h-7 w-7 rounded-lg" : "h-10 w-10 rounded-full",
+        active
+          ? "bg-gradient-to-br from-brand/18 via-brand-mid/14 to-brand-soft/18 ring-1 ring-brand/25 shadow-glow"
+          : "bg-transparent",
       ].join(" ")}
     >
       <Icon
         className={[
-          "h-5 w-5 transition-colors duration-mu",
-          active ? "text-mu-accent" : "text-mu-fg-3",
+          iconClass,
+          "transition-colors duration-200",
+          active ? "text-brand" : "text-ink-caption",
         ].join(" ")}
-        strokeWidth={active ? 2.25 : 1.75}
+        strokeWidth={active ? 2.4 : 2}
         fill={active ? "currentColor" : "none"}
         fillOpacity={active ? 0.12 : 0}
       />
-      {badgeCount != null && badgeCount > 0 ? (
-        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-mu-err px-0.5 text-mu-caption font-extrabold leading-none text-mu-on-accent">
-          {badgeCount > 9 ? "9+" : badgeCount}
-        </span>
-      ) : null}
     </span>
   );
 }
 
 function SideNavItem({
-  item,
+  href,
+  label,
+  icon,
   active,
   badgeCount,
-}: {
-  item: NavItem;
-  active: boolean;
-  badgeCount?: number;
-}) {
-  const ariaLabel =
-    item.badge && badgeCount != null && badgeCount > 0
-      ? `${item.label} ${badgeCount > 9 ? "9+" : badgeCount}건`
-      : item.label;
-
+}: NavItem & { active: boolean; badgeCount?: number }) {
   return (
     <Link
-      href={item.href}
-      aria-label={ariaLabel}
-      className="mu-focus relative flex min-h-tap w-full flex-col items-center justify-center gap-0.5 px-1 transition-colors active:scale-[0.97] hover:opacity-90"
+      href={href}
+      className="relative flex w-full flex-col items-center justify-center gap-px px-1.5 transition-colors active:scale-[0.97] hover:opacity-90"
       aria-current={active ? "page" : undefined}
     >
-      <NavIcon icon={item.icon} active={active} badgeCount={badgeCount} />
+      <NavIcon icon={icon} active={active} />
       <span
         className={[
-          "whitespace-nowrap text-mu-caption transition-colors",
-          active ? "font-bold text-mu-accent" : "font-semibold text-mu-fg-3",
+          "text-[9px] transition-colors",
+          active ? "font-bold text-brand" : "font-semibold text-ink-caption",
         ].join(" ")}
       >
-        {item.label}
+        {label}
       </span>
+      {badgeCount && badgeCount > 0 ? (
+        <span className="absolute right-1.5 top-1 inline-flex min-w-4 items-center justify-center rounded-full bg-gradient-to-r from-[#FAE100] to-[#FDE047] px-1.5 py-0.5 text-[9px] font-extrabold leading-none text-ink-heading shadow-sm">
+          {badgeCount > 999 ? "999+" : badgeCount}
+        </span>
+      ) : null}
     </Link>
   );
 }
 
 /**
- * 떠 있는 하단 네비게이션 (Threads/Instagram 독 느낌).
- * 모바일 캔버스 안, safe-area 위에 떠 있어요.
+ * 하단 고정 네비게이션 바.
+ * 모바일 캔버스 내부에 고정되며 홈 버튼을 중앙에 강조한다.
  */
 export function BottomNav() {
   const pathname = usePathname();
-  const inboxCount = useUnassignedInboxCount();
+  const homeActive = isActive(pathname, HOME_ITEM.href);
+  const { posts } = useCommunityState();
+  const { isPartyHost, isPartyJoined } = useCommunityActions();
+
+  const chatRoomPostIds = useMemo(
+    () =>
+      posts
+        .filter(
+          (post) =>
+            post.category === "party" &&
+            (isPartyHost(post) || isPartyJoined(post))
+        )
+        .map((post) => post.id),
+    [isPartyHost, isPartyJoined, posts]
+  );
+
+  const { unreadCountByPostId } = useChatRoomSummaries(chatRoomPostIds, true);
+  const opodUnreadCount = useMemo(
+    () => Object.values(unreadCountByPostId).reduce((sum, count) => sum + count, 0),
+    [unreadCountByPostId]
+  );
+
+  const HomeIcon = HOME_ITEM.icon;
 
   return (
-    <nav
-      aria-label="하단 메뉴"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-    >
-      <div className="pointer-events-auto w-full max-w-[22rem]">
-        <ul className="grid h-14 grid-cols-3 items-center overflow-visible rounded-full border border-mu-line bg-mu-card/90 px-2 shadow-mu-float backdrop-blur-md">
-          {NAV_ITEMS.map((item) => (
-            <li
-              key={item.href}
-              className="flex h-full items-center justify-center"
+    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center">
+      <div className="pointer-events-auto w-full max-w-mobile overflow-visible border-t border-line-soft/70 bg-surface-white/95 pb-[env(safe-area-inset-bottom)] shadow-nav backdrop-blur-md">
+        <ul className="grid h-[56px] grid-cols-5 items-center overflow-visible px-1">
+          {LEFT_ITEMS.map((item) => (
+            <li key={item.href} className="flex h-full items-center justify-center">
+              <SideNavItem {...item} active={isActive(pathname, item.href)} />
+            </li>
+          ))}
+
+          <li className="relative flex h-full flex-col items-center justify-center gap-px overflow-visible">
+            <span className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-visible">
+              <Link
+                href={HOME_ITEM.href}
+                aria-current={homeActive ? "page" : undefined}
+                aria-label="홈"
+                className={[
+                  "absolute left-1/2 top-1/2 z-10 flex h-12 w-12 -translate-x-1/2 -translate-y-[calc(50%+12px)] items-center justify-center rounded-full border-[3px] border-surface-white ai-gradient-bg shadow-[0_10px_24px_rgba(37,99,235,0.5)] transition-all active:scale-95",
+                  homeActive ? "ring-2 ring-brand/50" : "hover:brightness-105",
+                ].join(" ")}
+              >
+                <HomeIcon
+                  className="h-6 w-6 fill-surface-white text-surface-white"
+                  strokeWidth={2.2}
+                />
+              </Link>
+            </span>
+            <span
+              className={[
+                "text-[9px] font-bold transition-colors",
+                homeActive
+                  ? "bg-gradient-to-r from-brand to-[#6366F1] bg-clip-text text-transparent"
+                  : "text-brand",
+              ].join(" ")}
             >
-              <SideNavItem
-                item={item}
-                active={isActive(pathname, item)}
-                badgeCount={item.badge ? inboxCount : undefined}
+              {HOME_ITEM.label}
+            </span>
+          </li>
+
+          {RIGHT_ITEMS.map((item) => (
+            <li key={item.href} className="flex h-full items-center justify-center">              <SideNavItem
+                {...item}
+                active={isActive(pathname, item.href)}
+                badgeCount={item.href === "/opod" ? opodUnreadCount : undefined}
               />
             </li>
           ))}

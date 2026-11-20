@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { readBodyLimited, readJsonLimited } from "@/lib/agent/body-limit";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 const SubscribeSchema = z.object({
@@ -24,8 +23,6 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const body = await readJsonLimited(request, 8192);
   if (!body.ok) return body.response;
@@ -50,7 +47,7 @@ export async function POST(request: Request) {
   );
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
@@ -62,8 +59,6 @@ export async function DELETE(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const body = await readBodyLimited(request, 4096);
   if (!body.ok) return body.response;
@@ -91,7 +86,7 @@ export async function DELETE(request: Request) {
 
   const { error } = await q;
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

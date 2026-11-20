@@ -8,9 +8,9 @@ export type LedgerCategory =
 
 export type SplitType = "equal" | "fixed" | "ratio" | "custom";
 export type PaymentMethod = "card" | "cash" | "transfer";
-type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
+export type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
 export type FxSource = "auto_daily" | "cash_manual";
-type MemberRole = "owner" | "member";
+export type MemberRole = "owner" | "member";
 
 export interface TripMember {
   id: string;
@@ -21,7 +21,7 @@ export interface TripMember {
   userId?: string | null;
 }
 
-interface LedgerItem {
+export interface LedgerItem {
   name: string;
   nameKo?: string | null;
   qty?: number | null;
@@ -30,17 +30,6 @@ interface LedgerItem {
 }
 
 /** Step 5-C / L-7 호환 앱 타입. merchant 가 있으면 label 로도 노출. */
-/** agent_reasons.flags 중 UI에 노출하는 부분집합만. 원문 reasons는 전달하지 않는다. */
-export type ExpenseFlags = {
-  overseas?: boolean;
-  dcc?: {
-    level: "none" | "suspected" | "confirmed";
-    markupPct: number | null;
-    markupKrw: number | null;
-  };
-  dupCharge?: boolean;
-};
-
 export interface LedgerExpenseRow {
   id: string;
   tripId: string;
@@ -75,20 +64,6 @@ export interface LedgerExpenseRow {
   items?: LedgerItem[];
   note?: string | null;
   dedupeHash?: string | null;
-  /** 실제 청구 원화(해외 청구 문자·수동 입력). 있으면 정산 KRW 는 이 값. */
-  billedKrw?: number | null;
-  billedSource?: "sms" | "manual" | null;
-  billedEventId?: string | null;
-  /** 병합 스냅샷·메타 (되돌리기용). */
-  fxMerge?: Record<string, unknown> | null;
-  /** agent_reasons.flags 중 UI에 노출하는 부분집합. */
-  flags?: ExpenseFlags | null;
-  /** 일본 면세(택스리펀드) 대상 표시 */
-  taxFree?: boolean;
-  /** 원통화 세별도 금액 (환급액 아님) */
-  taxExclAmount?: number | null;
-  /** 영수증 스토리지 경로 존재 여부만 (경로는 노출하지 않음) */
-  hasReceipt?: boolean;
 }
 
 export interface ExpenseRowDb {
@@ -125,14 +100,6 @@ export interface ExpenseRowDb {
   split_type: string;
   dedupe_hash?: string | null;
   note?: string | null;
-  billed_krw?: number | string | null;
-  billed_source?: string | null;
-  billed_event_id?: string | null;
-  fx_merge?: unknown;
-  agent_reasons?: unknown;
-  tax_free?: boolean | null;
-  tax_excl_amount?: number | string | null;
-  receipt_path?: string | null;
 }
 
 export interface ShareRowDb {
@@ -161,40 +128,6 @@ function num(v: number | string | null | undefined, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** agent_reasons JSON에서 UI용 flags만 추출. 원문 reasons는 노출하지 않는다. */
-function flagsFromAgentReasons(raw: unknown): ExpenseFlags | null {
-  if (!raw || typeof raw !== "object") return null;
-  const flags = (raw as { flags?: unknown }).flags;
-  if (!flags || typeof flags !== "object") return null;
-  const f = flags as Record<string, unknown>;
-  const out: ExpenseFlags = {};
-  if (f.overseas === true) out.overseas = true;
-  if (f.dupCharge === true) out.dupCharge = true;
-  const dcc = f.dcc;
-  if (dcc && typeof dcc === "object") {
-    const d = dcc as Record<string, unknown>;
-    const level =
-      d.level === "confirmed" || d.level === "suspected" || d.level === "none"
-        ? d.level
-        : null;
-    if (level) {
-      out.dcc = {
-        level,
-        markupPct:
-          typeof d.markupPct === "number" && Number.isFinite(d.markupPct)
-            ? d.markupPct
-            : null,
-        markupKrw:
-          typeof d.markupKrw === "number" && Number.isFinite(d.markupKrw)
-            ? Math.round(d.markupKrw)
-            : null,
-      };
-    }
-  }
-  if (!out.overseas && !out.dupCharge && !out.dcc) return null;
-  return out;
-}
-
 export function rowToExpense(
   row: ExpenseRowDb,
   shareRows: ShareRowDb[] = []
@@ -210,15 +143,6 @@ export function rowToExpense(
   const merchant = (row.merchant ?? row.label ?? "").toString();
   const fx = num(row.fx_rate ?? row.fx_rate_to_krw, 1);
   const split = row.split_type as SplitType;
-  const billedRaw = row.billed_krw;
-  const billedKrw =
-    billedRaw == null || billedRaw === ""
-      ? null
-      : num(billedRaw);
-  const billedSource =
-    row.billed_source === "sms" || row.billed_source === "manual"
-      ? row.billed_source
-      : null;
 
   return {
     id: row.id,
@@ -254,20 +178,6 @@ export function rowToExpense(
     items: Array.isArray(row.items) ? (row.items as LedgerItem[]) : [],
     note: row.note ?? null,
     dedupeHash: row.dedupe_hash ?? null,
-    billedKrw: billedKrw != null && billedKrw > 0 ? billedKrw : null,
-    billedSource,
-    billedEventId: row.billed_event_id ?? null,
-    fxMerge:
-      row.fx_merge && typeof row.fx_merge === "object"
-        ? (row.fx_merge as Record<string, unknown>)
-        : null,
-    flags: flagsFromAgentReasons(row.agent_reasons),
-    taxFree: Boolean(row.tax_free),
-    taxExclAmount:
-      row.tax_excl_amount == null || row.tax_excl_amount === ""
-        ? null
-        : num(row.tax_excl_amount),
-    hasReceipt: Boolean(row.receipt_path),
   };
 }
 

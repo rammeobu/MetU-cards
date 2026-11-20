@@ -1,21 +1,9 @@
 import "server-only";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import {
-  pushFollowUpEventId,
-  runDomainFollowUps,
-} from "@/lib/agent/domain-followup";
 import { createEvent } from "@/lib/agent/ingest";
-import { maybeSuggestRebalance } from "@/lib/agent/rebalance-run";
 import { extractTextDrafts } from "@/lib/agent/extract-text";
-import { detectImageMime } from "@/lib/agent/image-magic";
-import {
-  extractReceiptFromImage,
-  type ReceiptTripContext,
-} from "@/lib/agent/receipt-vision";
-import { preferSmsParseText } from "@/lib/agent/sms-text";
 import { notifyUsers } from "@/lib/agent/notify";
-import { detectDcc, detectDupCharge } from "@/lib/ledger/dcc";
 import {
   decide,
   policyEnvFromProcess,
@@ -26,26 +14,11 @@ import type { ExpenseDraftInput } from "@/lib/ledger/draft";
 import {
   dedupeHash,
   findDuplicateCandidates,
-  isReceiptStrongCandidate,
-  type DuplicateCandidate,
 } from "@/lib/ledger/dedupe";
-import {
-  decideFxMerge,
-  findBilledForForeign,
-  findForeignForBilled,
-  fxMergeBandFromEnv,
-  type FxMergeDecision,
-} from "@/lib/ledger/fx-merge";
-import { receiptDraftToExpenseDraft } from "@/lib/ledger/receipt-client";
 import { computeKrw } from "@/lib/ledger/money";
 import { getDailyFxQuote } from "@/lib/ledger/fx-server";
 import { onExpenseChanged } from "@/lib/agent/handlers/settlement";
-import { ensureOwnerMemberAdmin } from "@/lib/agent/membership";
 import { pickTripForReceivedAt } from "@/lib/onboarding/agent-context";
-import {
-  readTripMatchRule,
-  tripPickToResult,
-} from "@/lib/onboarding/trip-match";
 import { parseReceivedAtMs } from "@/lib/onboarding/trip-window";
 
 type TripMemberRow = {
@@ -60,8 +33,7 @@ type TripRow = {
   user_id: string;
   start_date?: string | null;
   end_date?: string | null;
-  /** trips.local_currency (there is no trips.currency column) */
-  local_currency?: string | null;
+  currency?: string | null;
 };
 
 type EventRow = {
@@ -73,8 +45,6 @@ type EventRow = {
   payload: Record<string, unknown> | null;
   status: string;
   created_at: string;
-  /** e.g. { match: { rule } } written at ingest / attach time */
-  result?: Record<string, unknown> | null;
 };
 
 function todayKst(): string {
@@ -112,39 +82,21 @@ async function loadCtx(tripId: string, userId: string) {
   const admin = getAgentAdmin();
   if (!admin) return null;
 
-  const { data: trip, error: tripError } = await admin
+  const { data: trip } = await admin
     .from("trips")
-    .select("id, user_id, start_date, end_date, local_currency")
+    .select("id, user_id, start_date, end_date, currency")
     .eq("id", tripId)
     .maybeSingle();
-  if (tripError) {
-    // A bad column name used to be swallowed here and surfaced as "no-owner-member".
-    console.error("[loadCtx] trip query failed", tripError.message);
-    return null;
-  }
   if (!trip) return null;
 
-  const loadMembers = async (): Promise<TripMemberRow[]> => {
-    const { data: members } = await admin
-      .from("trip_members")
-      .select("id, user_id, display_name, auto_include")
-      .eq("trip_id", tripId);
-    return (members ?? []) as TripMemberRow[];
-  };
+  const { data: members } = await admin
+    .from("trip_members")
+    .select("id, user_id, display_name, auto_include")
+    .eq("trip_id", tripId);
 
-  let list = await loadMembers();
+  const list = (members ?? []) as TripMemberRow[];
   // Event actor must be a member — do not silently fall back to trip owner.
-  let ownerMember = list.find((m) => m.user_id === userId) ?? null;
-
-  // The owner's own row used to exist only after the ledger screen was opened.
-  // Guarantee it on the server (idempotent) when the actor owns the trip.
-  if (!ownerMember && (trip as TripRow).user_id === userId) {
-    const ensured = await ensureOwnerMemberAdmin(tripId, userId);
-    if (ensured.ok) {
-      list = await loadMembers();
-      ownerMember = list.find((m) => m.user_id === userId) ?? null;
-    }
-  }
+  const ownerMember = list.find((m) => m.user_id === userId) ?? null;
 
   return {
     trip: trip as TripRow,
@@ -255,16 +207,6 @@ type PricedWithMeta = PricedDraft & {
   __category?: string;
 };
 
-function draftLooksOverseas(draft: ExpenseDraftInput): boolean {
-  if ((draft as { overseas?: boolean }).overseas === true) return true;
-  const raw = draft.rawInput;
-  if (raw && typeof raw === "object" && "text" in raw) {
-    const text = (raw as { text?: unknown }).text;
-    if (typeof text === "string" && /해외/.test(text)) return true;
-  }
-  return false;
-}
-
 async function commitExpense(args: {
   actorId: string;
   tripId: string;
@@ -274,14 +216,10 @@ async function commitExpense(args: {
   draft: ExpenseDraftInput;
   reasons: string[];
   status: "auto" | "confirmed";
-  /** agent-uploads 경로 (영수증 출처일 때만) */
-  receiptPath?: string | null;
-  flags?: Record<string, unknown>;
 }): Promise<string | null> {
   const admin = getAgentAdmin();
   if (!admin) return null;
 
-  const isReceipt = args.draft.origin === "receipt";
   const payer = args.priced.payerMemberId;
   if (!payer) return null;
 
@@ -325,10 +263,7 @@ async function commitExpense(args: {
     category: args.priced.__category ?? "기타",
     amount: args.priced.amount,
     currency: args.priced.currency,
-    // 카드 문자는 카드, 영수증은 읽은 값만(못 읽으면 attach RPC 가 null 로 비운다)
-    payment_method: isReceipt ? (args.draft.paymentMethod ?? undefined) : "card",
-    merchant_ko: isReceipt ? (args.draft.merchantKo ?? null) : undefined,
-    items: isReceipt ? (args.draft.items ?? []) : undefined,
+    payment_method: "card",
     fx_rate: args.priced.__fxRate ?? 1,
     fx_rate_to_krw: args.priced.__fxRate ?? 1,
     fx_rate_date: args.priced.__fxDate,
@@ -339,7 +274,7 @@ async function commitExpense(args: {
     krw_base: args.priced.__krwBase ?? args.priced.krwAmount,
     fee_krw: args.priced.__feeKrw ?? 0,
     krw_amount: args.priced.krwAmount,
-    source: isReceipt ? "receipt" : "sms",
+    source: "sms",
     spent_on: args.draft.spentOn,
     paid_at: args.draft.paidAt,
     split_type: "equal",
@@ -355,238 +290,14 @@ async function commitExpense(args: {
     p_status: args.status,
     p_event_id: args.eventId,
     p_index: args.index,
-    p_reasons: {
-      reasons: args.reasons,
-      ...(args.flags
-        ? { flags: args.flags }
-        : args.draft.overseas
-          ? { flags: { overseas: true } }
-          : {}),
-    },
+    p_reasons: { reasons: args.reasons },
   });
 
   if (error) {
     console.error("[commitExpense]", error.message);
     return null;
   }
-  const expenseId = data as string;
-
-  if (isReceipt && args.receiptPath) {
-    // receipt_path 는 save RPC 가 받지 않으므로 attach RPC 로 붙인다 (실패해도 지출은 유지).
-    const attached = await attachReceipt({
-      actorId: args.actorId,
-      expenseId,
-      receiptPath: args.receiptPath,
-      eventId: args.eventId,
-      clearPaymentMethod: !args.draft.paymentMethod,
-    });
-    if (!attached.ok) {
-      console.error("[commitExpense] attach receipt failed", attached.error);
-    }
-  }
-  return expenseId;
-}
-
-type AttachResult =
-  | { ok: true; attached: boolean; reason?: string }
-  | { ok: false; error: string };
-
-type ApplyBilledResult =
-  | { ok: true; applied: boolean; already?: boolean }
-  | { ok: false; error: string };
-
-function readOverseasFlag(reasons: unknown): boolean {
-  if (!reasons || typeof reasons !== "object" || Array.isArray(reasons)) {
-    return false;
-  }
-  const flags = (reasons as { flags?: unknown }).flags;
-  if (!flags || typeof flags !== "object" || Array.isArray(flags)) return false;
-  return (flags as { overseas?: unknown }).overseas === true;
-}
-
-/** 외화 지출에 해외 원화 청구액을 붙이거나, 해외 원화 지출을 외화 지출로 바꾼다. */
-async function applyBilledKrw(args: {
-  actorId: string;
-  expenseId: string;
-  billedKrw: number;
-  source: "sms" | "manual";
-  eventId: string | null;
-  foreign?: {
-    amount: number;
-    currency: string;
-    fx_rate: number;
-    fx_rate_date?: string | null;
-    fx_is_fallback?: boolean;
-    krw_base: number;
-    items?: unknown;
-    merchant_ko?: string | null;
-    billed_event_id?: string | null;
-  } | null;
-}): Promise<ApplyBilledResult> {
-  const admin = getAgentAdmin();
-  if (!admin) return { ok: false, error: "server-misconfigured" };
-  const { data, error } = await admin.rpc("agent_apply_billed_krw", {
-    p_actor: args.actorId,
-    p_expense_id: args.expenseId,
-    p_billed_krw: Math.round(args.billedKrw),
-    p_source: args.source,
-    p_event_id: args.eventId,
-    p_foreign: args.foreign ?? null,
-  });
-  if (error) return { ok: false, error: error.message };
-  const row = (data ?? {}) as { applied?: boolean; already?: boolean };
-  return {
-    ok: true,
-    applied: row.applied === true,
-    already: row.already === true,
-  };
-}
-
-/**
- * 기존/신규 지출에 영수증 경로를 붙인다 (agent_attach_receipt, 기존 값 덮어쓰기 없음).
- * 새 지출을 만들지 않으므로 이중 기록이 생기지 않는다.
- */
-async function attachReceipt(args: {
-  actorId: string;
-  expenseId: string;
-  receiptPath: string;
-  eventId: string;
-  draft?: ExpenseDraftInput;
-  clearPaymentMethod?: boolean;
-}): Promise<AttachResult> {
-  const admin = getAgentAdmin();
-  if (!admin) return { ok: false, error: "server-misconfigured" };
-  const { data, error } = await admin.rpc("agent_attach_receipt", {
-    p_actor: args.actorId,
-    p_expense_id: args.expenseId,
-    p_receipt_path: args.receiptPath,
-    p_items: args.draft?.items ?? null,
-    p_merchant_ko: args.draft?.merchantKo ?? null,
-    p_clear_payment_method: args.clearPaymentMethod ?? false,
-    p_event_id: args.eventId,
-  });
-  if (error) return { ok: false, error: error.message };
-  const row = (data ?? {}) as { attached?: boolean; reason?: string };
-  return { ok: true, attached: row.attached === true, reason: row.reason };
-}
-
-type ReceiptImageOutcome =
-  | { ok: true; draft: ExpenseDraftInput; path: string }
-  | {
-      ok: false;
-      status: "needs_review" | "ignored";
-      reason: string;
-      message: string;
-    };
-
-const RECEIPT_UNREADABLE_MESSAGE = "영수증을 읽지 못했어요";
-
-function isOwnUploadPath(path: unknown, userId: string): path is string {
-  return (
-    typeof path === "string" &&
-    path.startsWith(`${userId}/`) &&
-    !path.includes("..") &&
-    !path.includes("\\")
-  );
-}
-
-/**
- * agent-uploads 의 사진을 내려받아 vision 으로 읽고 공통 초안으로 바꾼다.
- * 실패해도 던지지 않고 사유를 돌려준다 (이벤트는 needs_review 로 남는다).
- * 이미지 원본·추출 전문은 로그에 남기지 않는다.
- */
-async function readReceiptImage(args: {
-  userId: string;
-  tripId: string;
-  payload: Record<string, unknown>;
-  tripCurrency: string | null | undefined;
-  tripContext: ReceiptTripContext;
-}): Promise<ReceiptImageOutcome> {
-  const admin = getAgentAdmin();
-  const unreadable = (reason: string): ReceiptImageOutcome => ({
-    ok: false,
-    status: "needs_review",
-    reason,
-    message: RECEIPT_UNREADABLE_MESSAGE,
-  });
-  if (!admin) return unreadable("receipt_server_misconfigured");
-
-  const path = args.payload.path;
-  if (!isOwnUploadPath(path, args.userId)) {
-    return unreadable("receipt_bad_path");
-  }
-
-  const { data: blob, error: dlError } = await admin.storage
-    .from("agent-uploads")
-    .download(path);
-  if (dlError || !blob) {
-    console.error("[processEvent] receipt download failed", dlError?.message);
-    return unreadable("receipt_download_failed");
-  }
-
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const mime = detectImageMime(bytes);
-  if (!mime) return unreadable("receipt_unsupported_image");
-
-  const rawExif = args.payload.exif;
-  const exif =
-    rawExif && typeof rawExif === "object"
-      ? (rawExif as {
-          takenAt?: string;
-          lat?: number;
-          lng?: number;
-        })
-      : undefined;
-
-  const vision = await extractReceiptFromImage({
-    base64: Buffer.from(bytes).toString("base64"),
-    mime,
-    userId: args.userId,
-    tripId: args.tripId,
-    hintCurrency: args.tripCurrency,
-    tripContext: args.tripContext,
-    exif,
-  });
-
-  if (!vision.ok) {
-    if (vision.error === "not_receipt") {
-      return {
-        ok: false,
-        status: "ignored",
-        reason: "not_receipt",
-        message: "영수증이 아니어서 건너뛰었어요",
-      };
-    }
-    console.error("[processEvent] receipt vision failed", vision.error, vision.detail);
-    return unreadable(`receipt_${vision.error}`);
-  }
-
-  const base = receiptDraftToExpenseDraft(vision.draft, vision.extract);
-  return {
-    ok: true,
-    path,
-    draft: {
-      ...base,
-      // 영수증에 시각이 없으면 추정값(12:00)으로 시각 비교를 하지 않는다.
-      paidAt: base.timeIsEstimated ? null : base.paidAt,
-    },
-  };
-}
-
-function duplicateSignals(
-  dupes: DuplicateCandidate[],
-  existing: Array<{ id: string; spentOn: string }>,
-  receiptAttached: Set<string>
-) {
-  return dupes.map((d) => ({
-    expenseId: d.expenseId,
-    score: d.score,
-    spentOn: existing.find((e) => e.id === d.expenseId)?.spentOn ?? null,
-    strong: isReceiptStrongCandidate(d),
-    receiptAttached: receiptAttached.has(d.expenseId),
-    timeKnown: d.reasons.includes("within_30min"),
-    merchantSimilar: d.reasons.includes("merchant_similar"),
-  }));
+  return data as string;
 }
 
 /**
@@ -621,41 +332,28 @@ export async function processEvent(eventId: string): Promise<void> {
       return;
     }
 
-    const domainFollowUpIds: string[] = [];
-
     // Notification-first: attach by received_at window, else leave unassigned.
     if (!event.trip_id) {
       const receivedMs = parseReceivedAtMs(
         event.payload as Record<string, unknown> | null,
         event.created_at
       );
-      const pick = await pickTripForReceivedAt(
+      const resolved = await pickTripForReceivedAt(
         event.user_id,
         new Date(receivedMs)
       );
-      // Keep the rule-parser preview (if any); store the match rule / miss reason.
-      const prevPreview = event.result?.preview;
-      const matchResult = {
-        ...(prevPreview ? { preview: prevPreview } : {}),
-        ...tripPickToResult(pick),
-      };
-      if (pick.tripId) {
+      if (resolved) {
         await admin
           .from("agent_events")
-          .update({
-            trip_id: pick.tripId,
-            status: "processing",
-            result: matchResult,
-          })
+          .update({ trip_id: resolved, status: "processing" })
           .eq("id", event.id);
-        event.trip_id = pick.tripId;
-        event.result = matchResult;
+        event.trip_id = resolved;
       } else {
         await admin
           .from("agent_events")
           .update({
             status: "unassigned",
-            result: matchResult,
+            result: { reason: "unassigned" },
             error: null,
             processed_at: null,
             locked_at: null,
@@ -665,12 +363,8 @@ export async function processEvent(eventId: string): Promise<void> {
           event.id,
           seq++,
           "unassigned",
-          { reason: pick.reason ?? null },
-          {
-            reason: pick.reason ?? null,
-            suggest: pick.suggest ?? null,
-            message: "기간이 맞는 여행이 생기면 자동으로 붙여요",
-          },
+          {},
+          { message: "기간이 맞는 여행이 생기면 자동으로 붙여요" },
           0,
           true
         );
@@ -703,15 +397,11 @@ export async function processEvent(eventId: string): Promise<void> {
           eventId: event.id,
           payload,
         });
-        const rebalance = await maybeSuggestRebalance({
-          tripId: event.trip_id,
-          actorUserId: ctx.trip.user_id,
-        });
         await admin
           .from("agent_events")
           .update({
             status: "done",
-            result: { ...settlement, rebalance },
+            result: settlement,
             processed_at: new Date().toISOString(),
             error: null,
           })
@@ -729,7 +419,8 @@ export async function processEvent(eventId: string): Promise<void> {
       return;
     }
 
-    const text = preferSmsParseText(payload);
+    const text =
+      typeof payload.text === "string" ? payload.text : "";
 
     let drafts: ExpenseDraftInput[] = [];
     if (event.kind === "sms" || event.kind === "text") {
@@ -749,43 +440,16 @@ export async function processEvent(eventId: string): Promise<void> {
         true
       );
     } else if (event.kind === "image") {
-      const t0 = Date.now();
-      const read = await readReceiptImage({
-        userId: event.user_id,
-        tripId: event.trip_id,
-        payload,
-        tripCurrency: ctx.trip.local_currency,
-        tripContext: {
-          startDate: ctx.trip.start_date,
-          endDate: ctx.trip.end_date,
-          localCurrency: ctx.trip.local_currency,
-        },
-      });
-      await recordStep(
-        event.id,
-        ++seq,
-        "receiptVision",
-        {},
-        read.ok
-          ? { ok: true, hasAmount: read.draft.amount != null }
-          : { ok: false, reason: read.reason },
-        Date.now() - t0,
-        read.ok
-      );
-      if (!read.ok) {
-        await admin
-          .from("agent_events")
-          .update({
-            status: read.status,
-            result: { reason: read.reason, message: read.message, items: [] },
-            error: null,
-            processed_at: new Date().toISOString(),
-          })
-          .eq("id", event.id);
-        return;
-      }
-      drafts = [read.draft];
-      // receipt path 는 event.payload.path 에 있으며 confirm 시 서버가 읽어요.
+      // P12: vision — for now park as review
+      await admin
+        .from("agent_events")
+        .update({
+          status: "needs_review",
+          result: { reason: "receipt_pending_p12", drafts: [] },
+          processed_at: new Date().toISOString(),
+        })
+        .eq("id", event.id);
+      return;
     } else {
       await admin
         .from("agent_events")
@@ -813,71 +477,28 @@ export async function processEvent(eventId: string): Promise<void> {
     const { data: existingRows } = await admin
       .from("trip_expenses")
       .select(
-        "id, currency, amount, merchant, spent_on, krw_amount, krw_base, billed_krw, paid_at, status, source, receipt_path, source_event_id, agent_reasons, fx_rate, fx_rate_date, fx_is_fallback, items, merchant_ko"
+        "id, currency, amount, merchant, spent_on, krw_amount, paid_at, status"
       )
       .eq("trip_id", event.trip_id)
       .neq("status", "voided")
       .order("created_at", { ascending: false })
       .limit(200);
 
-    // 이 이벤트가 이미 저장한 지출(재처리)은 중복 후보에서 뺀다 — 저장은 멱등 키로 같은 id 를 돌려준다.
-    const priorRows = (existingRows ?? []).filter(
-      (e) => (e.source_event_id as string | null) !== event.id
-    );
-    const receiptAttached = new Set<string>(
-      priorRows
-        .filter((e) => typeof e.receipt_path === "string" && e.receipt_path)
-        .map((e) => e.id as string)
-    );
-    type ExistingExpense = {
-      id: string;
-      currency: string;
-      amount: number;
-      merchant: string;
-      spentOn: string;
-      krwAmount: number;
-      krwBase: number;
-      billedKrw: number | null;
-      paidAt: string | null;
-      source: string | null;
-      overseas: boolean;
-      fxRate: number;
-      fxRateDate: string | null;
-      fxIsFallback: boolean;
-      items: unknown;
-      merchantKo: string | null;
-    };
-    const existing: ExistingExpense[] = priorRows.map((e) => ({
+    const existing = (existingRows ?? []).map((e) => ({
       id: e.id as string,
       currency: String(e.currency ?? "KRW"),
       amount: Number(e.amount ?? 0),
       merchant: String(e.merchant ?? ""),
       spentOn: String(e.spent_on ?? ""),
       krwAmount: Number(e.krw_amount ?? 0),
-      krwBase: Number(e.krw_base ?? e.krw_amount ?? 0),
-      billedKrw:
-        e.billed_krw != null && Number(e.billed_krw) > 0
-          ? Number(e.billed_krw)
-          : null,
       paidAt: (e.paid_at as string | null) ?? null,
-      source: (e.source as string | null) ?? null,
-      overseas: readOverseasFlag(e.agent_reasons),
-      fxRate: Number(e.fx_rate ?? 1),
-      fxRateDate: (e.fx_rate_date as string | null) ?? null,
-      fxIsFallback: Boolean(e.fx_is_fallback),
-      items: e.items ?? null,
-      merchantKo: (e.merchant_ko as string | null) ?? null,
     }));
-    const fxBand = fxMergeBandFromEnv();
-    const tripId = event.trip_id as string;
 
-    const autoCountToday = await countAutoToday(event.user_id, event.trip_id);
+    let autoCountToday = await countAutoToday(event.user_id, event.trip_id);
     const env = policyEnvFromProcess(ctx.ownerMember.id);
-    // undefined = explicit trip (token / manual assign / attach RPC). near/single → never auto-save.
-    const tripMatchRule = readTripMatchRule(event.result);
     const items: Array<Record<string, unknown>> = [];
     let anyReview = false;
-    const anyFailedCommit = false;
+    let anyFailedCommit = false;
     let allIgnore = true;
 
     for (let i = 0; i < drafts.length; i++) {
@@ -936,80 +557,20 @@ export async function processEvent(eventId: string): Promise<void> {
           krwAmount: priced.krwAmount,
           paidAt: draft.paidAt,
           kind: draft.kind,
-          source: draft.source === "receipt" ? "receipt" : null,
-          timeIsEstimated: draft.timeIsEstimated,
         },
         existing
       );
 
-      // K1: 해외 원화 청구 문자 → 기존 외화 지출 / 외화 영수증 → 기존 해외 원화 지출
-      let fxMergeSignal: FxMergeDecision | undefined;
-      const draftCcy = priced.currency.trim().toUpperCase();
-      const isOverseasKrw = draft.overseas === true && draftCcy === "KRW";
-      const isForeignDraft = draftCcy !== "KRW";
-      if (isOverseasKrw) {
-        const candidates = findForeignForBilled(
-          {
-            tripId,
-            currency: "KRW",
-            krwAmount: priced.krwAmount,
-            overseas: true,
-            paidAt: draft.paidAt ?? null,
-            merchant: priced.__merchant ?? draft.merchant ?? null,
-          },
-          existing
-            .filter((e) => e.currency.toUpperCase() !== "KRW")
-            .map((e) => ({
-              id: e.id,
-              tripId,
-              currency: e.currency,
-              marketKrw: e.krwBase > 0 ? e.krwBase : e.krwAmount,
-              billedKrw: e.billedKrw,
-              paidAt: e.paidAt,
-              merchant: e.merchant,
-            })),
-          fxBand
-        );
-        fxMergeSignal = decideFxMerge(candidates);
-      } else if (isForeignDraft) {
-        const marketKrw = priced.__krwBase ?? priced.krwAmount;
-        const candidates = findBilledForForeign(
-          {
-            tripId,
-            currency: priced.currency,
-            marketKrw,
-            billedKrw: null,
-            paidAt: draft.paidAt ?? null,
-            merchant: priced.__merchant ?? draft.merchant ?? null,
-          },
-          existing
-            .filter(
-              (e) =>
-                e.currency.toUpperCase() === "KRW" &&
-                e.overseas &&
-                e.billedKrw == null
-            )
-            .map((e) => ({
-              id: e.id,
-              tripId,
-              currency: "KRW",
-              krwAmount: e.krwAmount,
-              overseas: true,
-              paidAt: e.paidAt,
-              merchant: e.merchant,
-            })),
-          fxBand
-        );
-        fxMergeSignal = decideFxMerge(candidates);
-      }
-
       const decision = decide(
         priced,
         {
-          duplicateCandidates: duplicateSignals(dupes, existing, receiptAttached),
+          duplicateCandidates: dupes.map((d) => ({
+            expenseId: d.expenseId,
+            score: d.score,
+            spentOn:
+              existing.find((e) => e.id === d.expenseId)?.spentOn ?? null,
+          })),
           autoCountToday,
-          tripMatchRule,
-          ...(fxMergeSignal ? { fxMerge: fxMergeSignal } : {}),
         },
         env
       );
@@ -1024,52 +585,6 @@ export async function processEvent(eventId: string): Promise<void> {
         true
       );
 
-      const overseas = draftLooksOverseas(draft);
-      const dcc = detectDcc({
-        tripLocalCurrency: ctx.trip.local_currency,
-        draftCurrency: priced.currency,
-        overseas,
-        merchant: priced.__merchant ?? draft.merchant,
-        foreignAmount: priced.currency !== "KRW" ? priced.amount : null,
-        foreignCurrency: priced.currency !== "KRW" ? priced.currency : null,
-        marketRate:
-          priced.currency !== "KRW" && priced.__fxRate
-            ? priced.__fxRate
-            : null,
-      });
-      const paidAtMs = draft.paidAt
-        ? Date.parse(draft.paidAt)
-        : Number.NaN;
-      const dupCharge =
-        Number.isFinite(paidAtMs) &&
-        detectDupCharge(
-          {
-            merchant: priced.__merchant ?? draft.merchant ?? "",
-            amount: priced.amount,
-            currency: priced.currency,
-            paidAtMs,
-            exactResend: decision.reasons.some((r) =>
-              /이미 받은 같은 문자/.test(r)
-            ),
-          },
-          existing
-            .filter((e) => e.paidAt)
-            .map((e) => ({
-              merchant: e.merchant,
-              amount: e.amount,
-              currency: e.currency,
-              paidAtMs: Date.parse(e.paidAt!),
-            }))
-        );
-      const expenseFlags: Record<string, unknown> = {};
-      if (overseas) expenseFlags.overseas = true;
-      if (dcc.level !== "none") expenseFlags.dcc = dcc;
-      if (dupCharge) expenseFlags.dupCharge = true;
-      const reasonCodes = [
-        ...decision.reasons,
-        ...(dupCharge ? ["possible_double_charge"] : []),
-      ];
-
       if (decision.decision === "ignore") {
         items.push({
           ref: i,
@@ -1081,63 +596,68 @@ export async function processEvent(eventId: string): Promise<void> {
 
       allIgnore = false;
 
-      let reviewReasons = reasonCodes;
-      let mergeInto: string | undefined = decision.duplicateOfExpenseId;
-      const mergeKind = decision.mergeKind;
-
-      // Budget-first: merge(청구액·영수증 붙이기)도 수락 전에는 원장을 바꾸지 않아요.
-      if (decision.decision === "merge" && mergeKind === "billed_krw") {
-        const target = decision.mergeExpenseId;
-        reviewReasons =
-          decision.reasons.length > 0
-            ? decision.reasons
-            : ["청구액을 합칠까요? 확인 후 반영해요"];
-        mergeInto = target;
-      } else if (decision.decision === "merge") {
-        const target = decision.mergeExpenseId;
-        reviewReasons =
-          decision.reasons.length > 0
-            ? decision.reasons
-            : ["이미 같은 결제가 있어요 — 합치기/별개로 저장"];
-        mergeInto = target;
-      }
-
-      // Budget-first: auto_commit 폐지. 예전 auto 경로도 확인함(review)으로만.
       if (decision.decision === "auto_commit") {
-        anyReview = true;
+        const expenseId = await commitExpense({
+          actorId: event.user_id,
+          tripId: event.trip_id,
+          eventId: event.id,
+          index: i,
+          priced,
+          draft,
+          reasons: decision.reasons,
+          status: "auto",
+        });
+
+        if (!expenseId) {
+          anyFailedCommit = true;
+          anyReview = true;
+          items.push({
+            ref: i,
+            decision: "review",
+            reasons: ["저장에 실패했어요. 다시 시도하거나 직접 확인해 주세요"],
+            draft,
+          });
+          continue;
+        }
+
+        autoCountToday += 1;
+        existing.unshift({
+          id: expenseId,
+          currency: priced.currency,
+          amount: priced.amount,
+          merchant: priced.__merchant ?? draft.merchant ?? "",
+          spentOn: draft.spentOn ?? "",
+          krwAmount: priced.krwAmount,
+          paidAt: draft.paidAt ?? null,
+        });
+
         items.push({
           ref: i,
-          decision: "review",
-          reasons: [
-            ...reasonCodes,
-            "suggestion_only",
-            "확인 후 반영해요",
-          ],
-          draft,
-          flags: expenseFlags,
-          reasonCode: "suggestion_only",
+          decision: "auto_commit",
+          expenseId,
+          reasons: decision.reasons,
         });
-        if (admin && event.trip_id) {
-          const { error: sugErr } = await admin.rpc("agent_create_suggestion", {
-            p_actor: event.user_id,
-            p_trip_id: event.trip_id,
-            p_type: "record",
-            p_payload: {
-              eventId: event.id,
-              sourceIndex: i,
-              draft,
-              priced: {
-                amount: priced.amount,
-                currency: priced.currency,
-                krwAmount: priced.krwAmount,
-              },
-              reasons: reasonCodes,
-            },
-          });
-          if (sugErr) {
-            console.error("[processEvent] create suggestion failed", sugErr.message);
-          }
-        }
+
+        await createEvent({
+          userId: event.user_id,
+          tripId: event.trip_id,
+          source: "domain",
+          kind: "domain",
+          payload: { type: "expense_changed", expenseId },
+          idempotencyKey: `expense_changed:${event.trip_id}:${expenseId}`,
+        });
+        await notifyUsers({
+          userIds: [event.user_id],
+          type: "expense_added",
+          tripId: event.trip_id,
+          actorId: event.user_id,
+          payload: {
+            expenseId,
+            krwAmount: priced.krwAmount,
+            merchant: priced.__merchant ?? draft.merchant,
+          },
+          dedupeKey: `expense_added:${expenseId}`,
+        });
         continue;
       }
 
@@ -1145,10 +665,7 @@ export async function processEvent(eventId: string): Promise<void> {
       items.push({
         ref: i,
         decision: "review",
-        reasons: reviewReasons,
-        ...(decision.reasonCode ? { reasonCode: decision.reasonCode } : {}),
-        ...(mergeKind ? { mergeKind } : {}),
-        ...(mergeInto ? { mergeInto } : {}),
+        reasons: decision.reasons,
         draft,
         priced: {
           krwAmount: priced.krwAmount,
@@ -1156,36 +673,12 @@ export async function processEvent(eventId: string): Promise<void> {
           amount: priced.amount,
         },
       });
-      if (admin && event.trip_id) {
-        const { error: sugErr } = await admin.rpc("agent_create_suggestion", {
-          p_actor: event.user_id,
-          p_trip_id: event.trip_id,
-          p_type: "record",
-          p_payload: {
-            eventId: event.id,
-            sourceIndex: i,
-            draft,
-            priced: {
-              amount: priced.amount,
-              currency: priced.currency,
-              krwAmount: priced.krwAmount,
-            },
-            reasons: reviewReasons,
-            reasonCode: decision.reasonCode ?? null,
-            mergeInto: mergeInto ?? null,
-            mergeKind: mergeKind ?? null,
-          },
-        });
-        if (sugErr) {
-          console.error("[processEvent] create suggestion failed", sugErr.message);
-        }
-      }
       await notifyUsers({
         userIds: [event.user_id],
         type: "expense_review",
         tripId: event.trip_id,
         actorId: event.user_id,
-        payload: { eventId: event.id, index: i, reasons: reviewReasons },
+        payload: { eventId: event.id, index: i, reasons: decision.reasons },
         dedupeKey: `expense_review:${event.id}:${i}`,
       });
     }
@@ -1202,16 +695,11 @@ export async function processEvent(eventId: string): Promise<void> {
       .from("agent_events")
       .update({
         status,
-        result: {
-          items,
-          ...(event.result?.match ? { match: event.result.match } : {}),
-        },
+        result: { items },
         processed_at: new Date().toISOString(),
         error: anyFailedCommit ? "commit-failed" : null,
       })
       .eq("id", event.id);
-
-    await runDomainFollowUps(event.kind, domainFollowUpIds, processEvent);
   } catch (err) {
     console.error("[processEvent]", err);
     await admin
@@ -1231,24 +719,13 @@ type ResultItem = {
   draft?: ExpenseDraftInput;
   expenseId?: string;
   reasons?: string[];
-  /** 같은 결제로 보이는 기존 지출 (영수증 합치기 후보) */
-  mergeInto?: string;
-  mergeKind?: "receipt_attach" | "billed_krw";
-  priced?: { krwAmount?: number; currency?: string; amount?: number };
 };
 
-/**
- * Manual confirm for needs_review items (P15 inbox).
- * mode "merge": 영수증을 기존 지출에 붙이고 새 지출은 만들지 않는다.
- * mode 생략/"separate": 새 지출로 저장한다.
- */
+/** Manual confirm for needs_review items (P15 inbox). */
 export async function confirmEventReviews(
   eventId: string,
   actorId: string,
-  input?: {
-    items?: Array<{ index: number; draft?: ExpenseDraftInput }>;
-    mode?: "merge" | "separate";
-  }
+  input?: { items?: Array<{ index: number; draft?: ExpenseDraftInput }> }
 ): Promise<
   | { ok: true; expenseIds: string[]; status: string }
   | { ok: false; error: string }
@@ -1258,7 +735,7 @@ export async function confirmEventReviews(
 
   const { data: row, error: loadErr } = await admin
     .from("agent_events")
-    .select("id, user_id, trip_id, kind, payload, status, result")
+    .select("id, user_id, trip_id, status, result")
     .eq("id", eventId)
     .maybeSingle();
 
@@ -1293,138 +770,10 @@ export async function confirmEventReviews(
   if (!ctx?.ownerMember) return { ok: false, error: "no-owner-member" };
 
   const expenseIds: string[] = [];
-  // 경로는 서버가 만든 payload 에서만 읽는다 (클라이언트 입력 불가).
-  const rowPayload = (row.payload ?? {}) as Record<string, unknown>;
-  const receiptPath =
-    row.kind === "image" && isOwnUploadPath(rowPayload.path, actorId)
-      ? rowPayload.path
-      : null;
 
   for (const commit of commits) {
     const idx = commit.index;
     const existing = items.find((it) => Number(it.ref) === idx);
-
-    if (input?.mode === "merge") {
-      const target = existing?.mergeInto;
-      if (!target) continue;
-
-      if (existing?.mergeKind === "billed_krw") {
-        const draft = existing.draft;
-        const draftCcy = (draft?.currency ?? existing.priced?.currency ?? "")
-          .toString()
-          .toUpperCase();
-        const isKrwDraft = draftCcy === "KRW" || draft?.overseas === true;
-
-        let applied: ApplyBilledResult;
-        if (isKrwDraft) {
-          const billedKrw =
-            typeof existing.priced?.krwAmount === "number" &&
-            existing.priced.krwAmount > 0
-              ? existing.priced.krwAmount
-              : typeof draft?.amount === "number"
-                ? draft.amount
-                : null;
-          if (billedKrw == null) continue;
-          applied = await applyBilledKrw({
-            actorId,
-            expenseId: target,
-            billedKrw,
-            source: "sms",
-            eventId,
-          });
-        } else {
-          // 외화 초안 → 기존 해외 원화 지출(K)에 외화 정보 얹기. 청구액은 K 의 krw_amount.
-          const { data: kRow } = await admin
-            .from("trip_expenses")
-            .select("krw_amount")
-            .eq("id", target)
-            .maybeSingle();
-          const billedKrw = Number(kRow?.krw_amount ?? 0);
-          if (!(billedKrw > 0)) continue;
-
-          const priced = draft
-            ? ((await priceDraft(
-                draft,
-                ctx.ownerMember.id,
-                ctx.members
-              )) as PricedWithMeta | null)
-            : null;
-          if (!priced) continue;
-
-          applied = await applyBilledKrw({
-            actorId,
-            expenseId: target,
-            billedKrw,
-            source: "sms",
-            eventId,
-            foreign: {
-              amount: priced.amount,
-              currency: priced.currency,
-              fx_rate: priced.__fxRate ?? 1,
-              fx_rate_date: priced.__fxDate ?? null,
-              fx_is_fallback: priced.fxIsFallback,
-              krw_base: priced.__krwBase ?? priced.krwAmount,
-              items: draft?.items ?? null,
-              merchant_ko: draft?.merchantKo ?? null,
-            },
-          });
-          if (applied.ok && receiptPath) {
-            await attachReceipt({
-              actorId,
-              expenseId: target,
-              receiptPath,
-              eventId,
-              draft,
-            });
-          }
-        }
-        if (!applied.ok) {
-          console.error(
-            "[confirmEventReviews] apply billed failed",
-            applied.error
-          );
-          continue;
-        }
-        expenseIds.push(target);
-        const mergedPos = items.findIndex((it) => Number(it.ref) === idx);
-        const merged: ResultItem = {
-          ref: idx,
-          decision: "merged",
-          mergeKind: "billed_krw",
-          expenseId: target,
-          reasons: ["사용자가 같은 해외 결제로 청구액을 합쳤어요"],
-        };
-        if (mergedPos >= 0) items[mergedPos] = merged;
-        else items.push(merged);
-        continue;
-      }
-
-      if (!receiptPath) continue;
-      const attached = await attachReceipt({
-        actorId,
-        expenseId: target,
-        receiptPath,
-        eventId,
-        draft: existing?.draft,
-      });
-      // 이미 다른 영수증이 붙어 있어도(attached=false) 새 지출은 만들지 않는다.
-      if (!attached.ok) {
-        console.error("[confirmEventReviews] attach failed", attached.error);
-        continue;
-      }
-      expenseIds.push(target);
-      const mergedPos = items.findIndex((it) => Number(it.ref) === idx);
-      const merged: ResultItem = {
-        ref: idx,
-        decision: "merged",
-        mergeKind: "receipt_attach",
-        expenseId: target,
-        reasons: ["사용자가 같은 결제로 합쳤어요"],
-      };
-      if (mergedPos >= 0) items[mergedPos] = merged;
-      else items.push(merged);
-      continue;
-    }
     const draft =
       commit.draft ??
       (existing?.draft as ExpenseDraftInput | undefined);
@@ -1446,7 +795,6 @@ export async function confirmEventReviews(
       draft,
       reasons: existing?.reasons ?? ["inbox_confirm"],
       status: "confirmed",
-      receiptPath,
     });
     if (!expenseId) continue;
 
@@ -1454,7 +802,7 @@ export async function confirmEventReviews(
     const pos = items.findIndex((it) => Number(it.ref) === idx);
     const next: ResultItem = {
       ref: idx,
-      decision: "confirmed",
+      decision: "auto_commit",
       expenseId,
       reasons: existing?.reasons ?? ["inbox_confirm"],
     };
@@ -1478,55 +826,6 @@ export async function confirmEventReviews(
       processed_at: new Date().toISOString(),
     })
     .eq("id", eventId);
-
-  const tripId = row.trip_id as string;
-
-  // 확인함에서 지출 확정 → 같은 event 의 open record Suggestion 도 accepted
-  try {
-    const { data: openRecords } = await admin
-      .from("trip_suggestions")
-      .select("id, payload")
-      .eq("trip_id", tripId)
-      .eq("type", "record")
-      .eq("status", "open")
-      .limit(50);
-    for (const sug of openRecords ?? []) {
-      const payload =
-        sug.payload && typeof sug.payload === "object"
-          ? (sug.payload as Record<string, unknown>)
-          : {};
-      if (payload.eventId !== eventId) continue;
-      const { error: markErr } = await admin.rpc(
-        "agent_mark_suggestion_accepted",
-        {
-          p_actor: actorId,
-          p_suggestion_id: sug.id,
-        }
-      );
-      if (markErr) {
-        console.error(
-          "[confirmEventReviews] mark suggestion",
-          markErr.message
-        );
-      }
-    }
-  } catch (err) {
-    console.error("[confirmEventReviews] mark suggestions", err);
-  }
-
-  const domainFollowUpIds: string[] = [];
-  for (const expenseId of expenseIds) {
-    const domainCreated = await createEvent({
-      userId: actorId,
-      tripId,
-      source: "domain",
-      kind: "domain",
-      payload: { type: "expense_changed", expenseId },
-      idempotencyKey: `expense_changed:${tripId}:${expenseId}`,
-    });
-    pushFollowUpEventId(domainFollowUpIds, domainCreated);
-  }
-  await runDomainFollowUps("text", domainFollowUpIds, processEvent);
 
   return { ok: true, expenseIds, status: nextStatus };
 }

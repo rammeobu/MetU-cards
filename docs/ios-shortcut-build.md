@@ -1,51 +1,70 @@
 # iOS 단축어로 MetU 알림 전송하기
 
-**사용자용 안내**는 앱의 `/onboarding/shortcut-guide`에 있어요. 이 문서는 단축어를 직접 만드는 **개발자용** 참고 자료예요.
-
 작성 시점 조사 기준 예시입니다. iOS 버전·단축어 UI는 바뀔 수 있어요. (`VERIFY:`)
-
-## 권장 흐름 (앱과 동일)
-
-1. MetU에서 **iCloud 단축어 추가** + **연결 코드** 발급
-2. **단축어** 앱 → **자동화** 탭 → **+** → **알림**
-3. **카드/결제 앱** 선택 → **필터**(제목/부제/본문 포함, 예: `승인`)
-4. **즉시 실행**, **실행 전에 묻기** 끔
-5. 동작: **단축어 실행** → **MetU 알림 전송**, 입력에 **알림 › 본문**(변수 칩)
-
-`VERIFY:` iOS 27 기준 메뉴명은 앱 가이드(`lib/onboarding/guide-content.ts`)와 맞춰 두었어요. 실기기에서 한 번 더 확인해 주세요.
 
 ## 준비물
 
-1. MetU **연결 코드** (`metu-` 로 시작)
-2. iPhone (iOS 27 권장 — `VERIFY:`)
+1. MetU 웹에서 발급한 **연결 코드** (Bearer 토큰, `mtu_` 로 시작)
+2. iPhone (알림 자동화는 최신 iOS 권장)
 3. 단축어 앱
 
-`IOS_SHORTCUT_ICLOUD_URL`(레포 `lib/onboarding/constants.ts`)로 공유 단축어를 추가할 수 있어요.
+환경변수 `NEXT_PUBLIC_IOS_SHORTCUT_URL` 이 있으면 온보딩에서 iCloud 링크를 바로 열 수 있어요.
+없으면 앱 안 안내(`/onboarding/shortcut-guide`)와 이 문서를 따라 직접 만드세요.
 
-## 수동 빌드 (URL 가져오기)
+## 1. 단축어 만들기 (수동)
 
-1. 단축어 앱 → **자동화** 탭 → **+** → **알림** → 앱 선택 → 필터 `승인` → **즉시 실행**
-2. **MetU 알림 전송** 단축어 실행 + 알림 본문 변수 전달
+1. 단축어 앱 → **자동화** → **개인 자동화** → **만들기**
+2. 트리거: **앱** → **앱이 알림을 받을 때** (또는 “알림”) → 카드 앱 선택
+3. **실행 전에 묻기** 끄기
+4. 동작 추가:
+   - **텍스트** (알림 본문/제목을 변수로 합침)
+   - **URL 내용 가져오기** (POST)
 
-### API (개발자용)
+### URL 내용 가져오기 설정
 
-- URL: `{origin}/api/ingest/sms` 또는 `{origin}/api/ingest/notification`
-- 헤더: `Authorization: Bearer <연결 코드>`, `Content-Type: application/json`
-- 본문: 앱 가이드의 **개발자용 설정 보기** 참고
+- URL: `https://met-u.vercel.app/api/ingest/notification` (또는 내 배포 도메인)
+- 방법: POST
+- 헤더:
+  - `Authorization`: `Bearer <연결 코드>`
+  - `Content-Type`: `application/json`
+- 요청 본문 (JSON):
 
-## 테스트
+```json
+{
+  "app": "KB Pay",
+  "title": "결제 알림",
+  "body": "승인 12,000원",
+  "received_at": "2026-10-30T12:00:00+09:00"
+}
+```
+
+단축어 변수로 `app` / `title` / `body` / 현재 시각을 넣으면 됩니다.
+`receivedAt`(camelCase) 도 동일하게 허용해요.
+
+## 2. 테스트
 
 1. 본문을 `MTU-TEST 연결 확인` 으로 한 번 보내기
 2. MetU 온보딩 3단계가 **연결 확인됨** 으로 바뀌는지 확인
+3. 실제 카드 알림 후 `/agent/inbox` 에 이벤트가 보이는지 확인
 
-## 문제 해결
+curl 예시:
+
+```bash
+curl -X POST "https://met-u.vercel.app/api/ingest/notification" \
+  -H "Authorization: Bearer mtu_YOUR_TOKEN" \
+  -H "content-type: application/json" \
+  -d "{\"app\":\"Test\",\"title\":\"ping\",\"body\":\"MTU-TEST\",\"received_at\":\"2026-10-30T12:00:00+09:00\"}"
+```
+
+## 3. 흔한 오류 5개
 
 1. **401 unauthorized** — 연결 코드가 잘못됐거나 앞뒤 공백/따옴표가 들어감
-2. **text_or_body_required** — 단축어 입력에 알림 본문 칩이 없음
-3. 자동화 **꺼져 있음** — 알림 필터 미설정
-4. **실행 전에 묻기** 켜짐 — 즉시 실행으로 변경
+2. **400 validation-failed** — `body` 또는 `app` 누락, 날짜 형식 오류
+3. **자동화 안 뜸** — 트리거 앱을 카드 앱으로 골랐는지, “실행 전에 묻기” 가 켜져 있는지
+4. **온보딩이 안 바뀜** — 본문이 `MTU-TEST` 로 시작해야 기기 테스트로 기록됨
+5. **미할당만 쌓임** — 여행 기간 밖 알림은 정상이에요. 여행 만들거나 수신함에서 수동 배정
 
-## 보안
+## 4. 보안
 
 - 연결 코드는 비밀번호처럼 다루세요. 채팅/스크린샷에 올리지 마세요.
-- 유출되면 MetU → 자동 수집 연결에서 코드를 중지하고 새로 발급하세요.
+- 유출되면 MetU → 자동 수집 연결에서 토큰을 폐기하고 새로 발급하세요.

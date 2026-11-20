@@ -3,16 +3,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { readJsonLimited } from "@/lib/agent/body-limit";
 import { getAgentEventForUser } from "@/lib/agent/event-access";
-import {
-  assertTripMember,
-  ensureOwnerMemberAdmin,
-} from "@/lib/agent/membership";
+import { assertTripMember } from "@/lib/agent/membership";
 import { processEvent } from "@/lib/agent/run";
-import { pickTripForReceivedAt } from "@/lib/onboarding/agent-context";
-import { parseReceivedAtMs } from "@/lib/onboarding/trip-window";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -31,8 +25,6 @@ export async function POST(
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const { id: eventId } = await context.params;
   if (!IdSchema.safeParse(eventId).success) {
@@ -44,10 +36,14 @@ export async function POST(
     return NextResponse.json({ error: owned.error }, { status: owned.status });
   }
 
-  const limited = await readJsonLimited(request, 4_096);
-  if (!limited.ok) return limited.response;
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid-json" }, { status: 400 });
+  }
 
-  const parsed = BodySchema.safeParse(limited.json);
+  const parsed = BodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "validation-failed" }, { status: 400 });
   }
@@ -84,27 +80,12 @@ export async function POST(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  // 본인 trip_members 행을 서버에서 보장 (실패해도 배정은 계속; processEvent 가 다시 시도).
-  await ensureOwnerMemberAdmin(tripId, guard.identity.userId);
-
-  // 사용자가 고른 여행이 알림 날짜와 맞지 않으면(near) 붙이되 자동 저장은 하지 않는다.
-  // 날짜가 맞으면(exact) 기존처럼 처리한다. (더 보수적인 방향으로만 판단)
-  const receivedMs = parseReceivedAtMs(
-    owned.event.payload,
-    owned.event.created_at
-  );
-  const pick = await pickTripForReceivedAt(
-    guard.identity.userId,
-    new Date(receivedMs)
-  );
-  const dateMatches = pick.exactTripIds?.includes(tripId) ?? false;
-
   const { error } = await admin
     .from("agent_events")
     .update({
       trip_id: tripId,
       status: "received",
-      result: { match: { rule: dateMatches ? "exact" : "near" } },
+      result: null,
       processed_at: null,
       locked_at: null,
       error: null,
@@ -116,7 +97,9 @@ export async function POST(
     return NextResponse.json({ error: "update-failed" }, { status: 500 });
   }
 
-  after(() => processEvent(eventId));
+  after(() => {
+    void processEvent(eventId);
+  });
 
   return NextResponse.json({ ok: true, tripId, status: "received" });
 }

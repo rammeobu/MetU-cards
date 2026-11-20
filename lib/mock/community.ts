@@ -1,4 +1,3 @@
-/** mock 아님: 기본값/필터 */
 import type { CommunityPost, PostCategory, WritablePostCategory } from "@/lib/community/types";
 
 export type { CommunityPost, PostCategory, WritablePostCategory };
@@ -19,6 +18,9 @@ export const CATEGORY_COLORS: Record<WritablePostCategory, string> = {
   tip: "bg-amber-50 text-amber-700",
   chat: "bg-violet-50 text-violet-700",
 };
+
+/** Early-access: 데모 게시글 없음 */
+export const MOCK_COMMUNITY_POSTS: CommunityPost[] = [];
 
 export function isSeedCommunityPost(post: Pick<CommunityPost, "id" | "authorId">): boolean {
   return (

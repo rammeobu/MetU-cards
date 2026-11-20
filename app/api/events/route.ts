@@ -1,15 +1,16 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { readJsonLimited } from "@/lib/agent/body-limit";
 import {
   buildSmsPayload,
+  createEvent,
   defaultSmsIdempotencyKey,
 } from "@/lib/agent/ingest";
-import { runIngest } from "@/lib/agent/ingest-pipeline";
 import { assertTripMember } from "@/lib/agent/membership";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { processEvent } from "@/lib/agent/run";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -27,8 +28,6 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const body = await readJsonLimited(request, 16_384);
   if (!body.ok) return body.response;
@@ -53,7 +52,7 @@ export async function POST(request: Request) {
   const idempotencyKey =
     parsed.data.idempotencyKey ?? defaultSmsIdempotencyKey(redacted);
 
-  const outcome = await runIngest({
+  const created = await createEvent({
     userId: guard.identity.userId,
     tripId: parsed.data.tripId,
     source: parsed.data.source,
@@ -62,19 +61,23 @@ export async function POST(request: Request) {
     idempotencyKey: `${parsed.data.tripId}:${idempotencyKey}`,
   });
 
-  if (!outcome.result.ok) {
-    return apiInternalError(outcome.result.error);
+  if (!created.ok) {
+    return NextResponse.json({ error: created.error }, { status: 500 });
   }
 
-  if (outcome.result.duplicate) {
+  if (created.duplicate) {
     return NextResponse.json(
-      { eventId: outcome.result.id, duplicate: true },
+      { eventId: created.id, duplicate: true },
       { status: 200 }
     );
   }
 
+  after(() => {
+    void processEvent(created.id);
+  });
+
   return NextResponse.json(
-    { eventId: outcome.result.id, status: "received" },
+    { eventId: created.id, status: "received" },
     { status: 202 }
   );
 }

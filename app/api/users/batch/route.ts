@@ -42,12 +42,8 @@ export async function POST(request: Request) {
       .in("id", ids);
 
     if (error) {
-      console.error("[users/batch]", error.message);
       return NextResponse.json(
-        {
-          profiles: {} as Record<string, PublicProfile>,
-          error: "internal-error",
-        },
+        { profiles: {} as Record<string, PublicProfile>, error: error.message },
         { status: 200 }
       );
     }

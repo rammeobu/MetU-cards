@@ -6,13 +6,7 @@ import { NextResponse } from "next/server";
 import { getAgentAdmin } from "@/lib/agent/admin";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 
-/** Readable ingest token prefix (Crockford base32 body). */
-export const TOKEN_PREFIX = "metu-";
-/** Legacy prefix kept for already-issued tokens. */
-export const LEGACY_TOKEN_PREFIX = "mtu_";
-
-/** Crockford base32 alphabet: no I, L, O, U (avoids 0/O and 1/I/L confusion). */
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+export const TOKEN_PREFIX = "mtu_";
 
 function pepper(): string | null {
   const p = process.env.AGENT_INGEST_PEPPER?.trim();
@@ -27,56 +21,12 @@ export function hashIngestToken(plain: string): string {
   return createHash("sha256").update(`${plain}${p}`, "utf8").digest("hex");
 }
 
-function encodeCrockford16(bytes: Buffer): string {
-  if (bytes.length !== 10) {
-    throw new Error("crockford-bytes");
-  }
-  let bits = 0n;
-  for (const b of bytes) {
-    bits = (bits << 8n) | BigInt(b);
-  }
-  let out = "";
-  for (let i = 15; i >= 0; i--) {
-    const idx = Number((bits >> BigInt(i * 5)) & 0x1fn);
-    out += CROCKFORD[idx]!;
-  }
-  return out;
+export async function hashIngestTokenAsync(plain: string): Promise<string> {
+  return hashIngestToken(plain);
 }
 
-/** Issue `metu-XXXX-XXXX-XXXX-XXXX` (16 Crockford chars, grouped by 4). */
 export function issueTokenPlaintext(): string {
-  const body = encodeCrockford16(randomBytes(10));
-  const groups = body.match(/.{1,4}/g) ?? [];
-  return `${TOKEN_PREFIX}${groups.join("-")}`;
-}
-
-const NEW_TOKEN_RE = /^metu-[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/;
-const LEGACY_TOKEN_RE = /^mtu_[A-Za-z0-9_-]{16,}$/;
-
-/**
- * Normalize bearer token for hash lookup.
- * - metu-… → trim + uppercase body (prefix forced to metu-)
- * - mtu_… → trim only (base64url is case-sensitive)
- * Returns null if format is invalid.
- */
-export function normalizeIngestToken(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  const lower = trimmed.toLowerCase();
-  if (lower.startsWith(TOKEN_PREFIX)) {
-    const body = trimmed.slice(TOKEN_PREFIX.length).toUpperCase();
-    const normalized = `${TOKEN_PREFIX}${body}`;
-    if (!NEW_TOKEN_RE.test(normalized)) return null;
-    return normalized;
-  }
-
-  if (trimmed.startsWith(LEGACY_TOKEN_PREFIX)) {
-    if (!LEGACY_TOKEN_RE.test(trimmed) || trimmed.length < 20) return null;
-    return trimmed;
-  }
-
-  return null;
+  return `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
 }
 
 function safeEqualHex(a: string, b: string): boolean {
@@ -106,9 +56,8 @@ export async function requireIngestToken(
 
   const auth = request.headers.get("authorization") ?? "";
   const m = /^Bearer\s+(\S+)$/i.exec(auth);
-  const raw = m?.[1] ?? "";
-  const plain = normalizeIngestToken(raw);
-  if (!plain) {
+  const plain = m?.[1]?.trim() ?? "";
+  if (!plain.startsWith(TOKEN_PREFIX) || plain.length < 20) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -199,20 +148,10 @@ export async function requireIngestToken(
     );
   }
 
-  try {
-    const { error: touchErr } = await admin
-      .from("agent_ingest_tokens")
-      .update({ last_used_at: new Date().toISOString() })
-      .eq("id", data.id);
-    if (touchErr) {
-      console.error("[requireIngestToken] last_used_at", touchErr.message);
-    }
-  } catch (err) {
-    console.error(
-      "[requireIngestToken] last_used_at",
-      err instanceof Error ? err.message : err
-    );
-  }
+  void admin
+    .from("agent_ingest_tokens")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", data.id);
 
   return {
     userId: data.user_id as string,

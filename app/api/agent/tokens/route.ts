@@ -2,21 +2,18 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { readJsonLimited } from "@/lib/agent/body-limit";
 import { assertTripMember } from "@/lib/agent/membership";
 import {
   hashIngestToken,
   issueTokenPlaintext,
 } from "@/lib/agent/tokens";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
 const CreateSchema = z.object({
   tripId: z.string().uuid().optional().nullable(),
   label: z.string().max(80).default(""),
-  replaceExisting: z.boolean().default(false),
 });
 
 export async function GET(request: Request) {
@@ -25,8 +22,6 @@ export async function GET(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const url = new URL(request.url);
   const tripIdRaw = url.searchParams.get("tripId");
@@ -60,7 +55,7 @@ export async function GET(request: Request) {
   const { data, error } = await query;
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({
@@ -81,13 +76,15 @@ export async function POST(request: Request) {
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
-  const limited = await readJsonLimited(request, 4_096);
-  if (!limited.ok) return limited.response;
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid-json" }, { status: 400 });
+  }
 
-  const parsed = CreateSchema.safeParse(limited.json);
+  const parsed = CreateSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "validation-failed" }, { status: 400 });
   }
@@ -114,37 +111,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "server-misconfigured" }, { status: 503 });
   }
 
-  const label = parsed.data.label || "";
-
   const { data, error } = await admin
     .from("agent_ingest_tokens")
     .insert({
       user_id: guard.identity.userId,
       trip_id: tripId,
-      label,
+      label: parsed.data.label || "",
       token_hash: tokenHash,
     })
     .select("id, created_at")
     .maybeSingle();
 
   if (error || !data) {
-    return apiInternalError(error?.message ?? "insert-failed");
-  }
-
-  let revokedCount = 0;
-  if (parsed.data.replaceExisting) {
-    const { data: revoked, error: revokeError } = await admin
-      .from("agent_ingest_tokens")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("user_id", guard.identity.userId)
-      .eq("label", label)
-      .is("revoked_at", null)
-      .neq("id", data.id)
-      .select("id");
-
-    if (!revokeError && Array.isArray(revoked)) {
-      revokedCount = revoked.length;
-    }
+    return NextResponse.json(
+      { error: error?.message ?? "insert-failed" },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({
@@ -152,7 +134,6 @@ export async function POST(request: Request) {
     createdAt: data.created_at,
     tripId,
     token: plain,
-    revokedCount,
-    warning: "이 연결 코드는 다시 볼 수 없어요. 지금 복사해 두세요.",
+    warning: "이 토큰은 다시 볼 수 없어요. 지금 복사해 두세요.",
   });
 }

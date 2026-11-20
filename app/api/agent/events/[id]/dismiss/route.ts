@@ -3,8 +3,7 @@ import { z } from "zod";
 
 import { getAgentEventForUser } from "@/lib/agent/event-access";
 import { getAgentAdmin } from "@/lib/agent/admin";
-import { apiInternalError } from "@/lib/api/respond";
-import { guardApi, rejectAnonymousWrite } from "@/lib/security/guard";
+import { guardApi } from "@/lib/security/guard";
 
 export const maxDuration = 60;
 
@@ -19,8 +18,6 @@ export async function POST(
   if (guard.identity.kind !== "user") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const anon = rejectAnonymousWrite(guard.identity);
-  if (anon) return anon;
 
   const { id: eventId } = await context.params;
   if (!IdSchema.safeParse(eventId).success) {
@@ -46,7 +43,7 @@ export async function POST(
     .eq("id", eventId);
 
   if (error) {
-    return apiInternalError(error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

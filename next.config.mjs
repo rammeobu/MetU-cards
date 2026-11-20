@@ -47,7 +47,6 @@ const nextConfig = {
     ];
   },
   images: {
-    formats: ["image/avif", "image/webp"],
     remotePatterns: [
       {
         protocol: "https",
@@ -116,7 +115,9 @@ const nextConfig = {
     ],
   },
   webpack: (config, { dev }) => {
-    // Keep filesystem watch polling on Windows/OneDrive; prod webpack cache stays on.
+    if (!dev) {
+      config.cache = false;
+    }
     if (dev) {
       config.watchOptions = {
         poll: 1000,
