@@ -95,39 +95,22 @@ function priceWeight(priceLevel?: string): number {
   return 1;
 }
 
-/** 직전 방문 장소(anchor)에서 가장 가까운 같은 종류의 장소를 우선 선별 (Nearest-Neighbor) */
-function pickNearestByKind(
+function pickByKind(
   pool: Place[],
   used: Set<string>,
-  kinds: PlaceKind[],
-  anchor?: { lat: number; lng: number }
+  kinds: PlaceKind[]
 ): Place | null {
-  const available = pool.filter(
-    (p) =>
-      kinds.includes(p.kind) && !used.has(`${p.provider}:${p.providerPlaceId}`)
-  );
-
-  if (!available.length) {
-    const fallback = pool.find(
-      (p) => !used.has(`${p.provider}:${p.providerPlaceId}`)
+  for (const kind of kinds) {
+    const found = pool.find(
+      (p) =>
+        p.kind === kind && !used.has(`${p.provider}:${p.providerPlaceId}`)
     );
-    return fallback ?? null;
+    if (found) return found;
   }
-
-  // 기준 좌표가 없으면 첫 번째 후보 반환
-  if (!anchor) return available[0]!;
-
-  // 기준 좌표에서 하버사인 거리가 가장 짧은 장소 탐색
-  let best = available[0]!;
-  let bestDist = Infinity;
-  for (const place of available) {
-    const dist = haversineKm(anchor, place);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = place;
-    }
-  }
-  return best;
+  const any = pool.find(
+    (p) => !used.has(`${p.provider}:${p.providerPlaceId}`)
+  );
+  return any ?? null;
 }
 
 function toItem(
@@ -193,7 +176,7 @@ export function buildScheduleFromCandidates(params: {
         fixed: true,
         kind: "lodging",
       });
-      const dinner = pickNearestByKind(pool, used, ["food", "cafe"]);
+      const dinner = pickByKind(pool, used, ["food", "cafe"]);
       if (dinner) {
         used.add(`${dinner.provider}:${dinner.providerPlaceId}`);
         items.push(
@@ -214,7 +197,7 @@ export function buildScheduleFromCandidates(params: {
         });
       }
     } else if (d === dayCount - 1) {
-      const morning = pickNearestByKind(pool, used, [
+      const morning = pickByKind(pool, used, [
         "attraction",
         "shopping",
         "cafe",
@@ -247,8 +230,7 @@ export function buildScheduleFromCandidates(params: {
         kind: "transport",
       });
     } else {
-      // 1. 오전: 클러스터 내 대표 명소/카페 선별
-      const morningPick = pickNearestByKind(pool, used, [
+      const morningPick = pickByKind(pool, used, [
         "attraction",
         "shopping",
         "cafe",
@@ -265,15 +247,7 @@ export function buildScheduleFromCandidates(params: {
         );
       }
 
-      // 2. 점심: 오전 명소에서 가장 가까운 식당 선별
-      const lunch = pickNearestByKind(
-        pool,
-        used,
-        ["food", "cafe"],
-        morningPick
-          ? { lat: morningPick.lat, lng: morningPick.lng }
-          : undefined
-      );
+      const lunch = pickByKind(pool, used, ["food", "cafe"]);
       if (lunch) {
         used.add(`${lunch.provider}:${lunch.providerPlaceId}`);
         items.push(
@@ -281,16 +255,11 @@ export function buildScheduleFromCandidates(params: {
         );
       }
 
-      // 3. 오후1: 점심 식당에서 가장 가까운 명소/쇼핑 선별
-      const anchorAfterLunch = lunch ?? morningPick;
-      const aft1 = pickNearestByKind(
-        pool,
-        used,
-        ["attraction", "shopping"],
-        anchorAfterLunch
-          ? { lat: anchorAfterLunch.lat, lng: anchorAfterLunch.lng }
-          : undefined
-      );
+      const aft1 = pickByKind(pool, used, [
+        "attraction",
+        "shopping",
+        "cafe",
+      ]);
       if (aft1) {
         used.add(`${aft1.provider}:${aft1.providerPlaceId}`);
         items.push(
@@ -302,16 +271,11 @@ export function buildScheduleFromCandidates(params: {
         );
       }
 
-      // 4. 오후2: 오후1 장소에서 가장 가까운 카페/명소 선별
-      const anchorAft1 = aft1 ?? anchorAfterLunch;
-      const aft2 = pickNearestByKind(
-        pool,
-        used,
-        ["cafe", "attraction", "shopping"],
-        anchorAft1
-          ? { lat: anchorAft1.lat, lng: anchorAft1.lng }
-          : undefined
-      );
+      const aft2 = pickByKind(pool, used, [
+        "shopping",
+        "attraction",
+        "cafe",
+      ]);
       if (aft2) {
         used.add(`${aft2.provider}:${aft2.providerPlaceId}`);
         items.push(
@@ -323,16 +287,7 @@ export function buildScheduleFromCandidates(params: {
         );
       }
 
-      // 5. 저녁: 오후 장소에서 가장 가까운 저녁 식당 선별
-      const anchorAft2 = aft2 ?? anchorAft1;
-      const dinner = pickNearestByKind(
-        pool,
-        used,
-        ["food"],
-        anchorAft2
-          ? { lat: anchorAft2.lat, lng: anchorAft2.lng }
-          : undefined
-      );
+      const dinner = pickByKind(pool, used, ["food"]);
       if (dinner) {
         used.add(`${dinner.provider}:${dinner.providerPlaceId}`);
         items.push(

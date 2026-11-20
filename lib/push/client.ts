@@ -43,18 +43,6 @@ async function registrationReady(): Promise<ServiceWorkerRegistration> {
   });
 }
 
-export async function isPushSubscribed(): Promise<boolean> {
-  if (!getPushSupport().supported) return false;
-  try {
-    const registration = await navigator.serviceWorker.getRegistration("/");
-    if (!registration) return false;
-    const sub = await registration.pushManager.getSubscription();
-    return Boolean(sub);
-  } catch {
-    return false;
-  }
-}
-
 export async function enablePush(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
@@ -101,36 +89,27 @@ export async function enablePush(): Promise<
 export async function disablePush(): Promise<
   { ok: true } | { ok: false; error: string }
 > {
-  const support = getPushSupport();
-  if (!support.supported) {
-    return { ok: false, error: support.reason ?? "unsupported" };
+  if (!("serviceWorker" in navigator)) {
+    return { ok: false, error: "no-sw" };
   }
 
-  try {
-    const registration = await navigator.serviceWorker.getRegistration("/");
-    const subscription = registration
-      ? await registration.pushManager.getSubscription()
-      : null;
-    const endpoint = subscription?.endpoint;
+  const registration = await navigator.serviceWorker.getRegistration("/");
+  const subscription = registration
+    ? await registration.pushManager.getSubscription()
+    : null;
 
-    if (subscription) {
-      await subscription.unsubscribe();
-    }
+  const endpoint = subscription?.endpoint;
 
-    const res = await fetch("/api/push/subscribe", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(endpoint ? { endpoint } : {}),
-      credentials: "include",
-    });
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      return { ok: false, error: data.error ?? `http-${res.status}` };
-    }
-
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "unsubscribe-failed" };
+  if (subscription) {
+    await subscription.unsubscribe().catch(() => undefined);
   }
+
+  await fetch("/api/push/subscribe", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(endpoint ? { endpoint } : {}),
+    credentials: "include",
+  }).catch(() => undefined);
+
+  return { ok: true };
 }

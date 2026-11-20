@@ -57,8 +57,6 @@ interface AuthContextValue {
   isLoggedIn: boolean;
   user: AuthUser | null;
   provider: AuthProviderKind;
-  /** Supabase 익명 세션. 쿠키 guest(provider==="guest")와는 별개. */
-  isAnonymous: boolean;
   loginWithKakao: () => Promise<AuthActionResult>;
   loginWithEmail: (email: string, password: string) => Promise<AuthActionResult>;
   signUpWithEmail: (email: string, password: string) => Promise<SignUpResult>;
@@ -355,14 +353,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const isAnonymous = Boolean(user?.is_anonymous);
   const value = useMemo(
     () => ({
       isReady,
       isLoggedIn: Boolean(user) || isGuest,
       user,
       provider,
-      isAnonymous,
       loginWithKakao,
       loginWithEmail,
       signUpWithEmail,
@@ -375,7 +371,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isGuest,
       provider,
-      isAnonymous,
       loginWithKakao,
       loginWithEmail,
       signUpWithEmail,

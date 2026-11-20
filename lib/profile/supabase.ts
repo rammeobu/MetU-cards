@@ -5,7 +5,7 @@ import { MOCK_PROFILE, type ProfileUser } from "@/lib/mock/profile";
 
 const AVATAR_BUCKET = "avatars";
 
-interface ProfileRow {
+export interface ProfileRow {
   id: string;
   display_name: string;
   email: string | null;

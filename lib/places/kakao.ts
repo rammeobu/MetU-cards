@@ -65,7 +65,7 @@ async function kakaoGet(
   }
 }
 
-class KakaoPlaceProvider implements PlaceProvider {
+export class KakaoPlaceProvider implements PlaceProvider {
   readonly id = "kakao" as const;
   readonly capabilities = CAPABILITIES;
 

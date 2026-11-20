@@ -28,7 +28,7 @@ const ItemExclusionEntry = z.strictObject({
   itemIndex: z.number().int().min(0).max(199),
 });
 
-const CLARIFICATION_MAX = 200;
+export const CLARIFICATION_MAX = 200;
 /** 미리보기 API 에 보내는 자연어 요청 최대 길이. */
 export const SPLIT_PATCH_TEXT_MAX = 300;
 
@@ -59,52 +59,6 @@ export const SplitPatchSchema = z
 
 export type SplitPatch = z.infer<typeof SplitPatchSchema>;
 export type SplitPatchKind = "exclude" | "only" | "weights" | "itemExclusions";
-
-/** 배치 미리보기 응답용. expenseId 는 서버가 채운 실제 UUID. */
-export const BatchSplitPatchSchema = z.strictObject({
-  patches: z.array(SplitPatchSchema).max(10),
-  clarification: z.string().trim().max(CLARIFICATION_MAX).nullable(),
-});
-
-export type BatchSplitPatch = z.infer<typeof BatchSplitPatchSchema>;
-
-/**
- * LLM 출력용. 지출은 번호(expenseIndex)로만 받고 서버가 UUID 로 바꾼다.
- * 금액 계열 키는 SplitPatchSchema 와 같이 없다.
- */
-export const BatchSplitPatchLlmSchema = z
-  .strictObject({
-    patches: z
-      .array(
-        z.strictObject({
-          expenseIndex: z.number().int().min(0).max(19),
-          exclude: z.array(MemberRef).max(20),
-          only: z.array(MemberRef).max(20),
-          weights: z.array(WeightEntry).max(20),
-          itemExclusions: z.array(ItemExclusionEntry).max(100),
-          clarification: z.string().trim().max(CLARIFICATION_MAX).nullable(),
-        })
-      )
-      .max(10),
-    clarification: z.string().trim().max(CLARIFICATION_MAX).nullable(),
-  })
-  .superRefine((batch, ctx) => {
-    for (let i = 0; i < batch.patches.length; i++) {
-      const p = batch.patches[i]!;
-      const filled = patchKinds(p).length;
-      const hasClarification = Boolean(p.clarification);
-      if (filled === 1) continue;
-      if (filled === 0 && hasClarification) continue;
-      ctx.addIssue({
-        code: "custom",
-        path: ["patches", i],
-        message:
-          "exclude, only, weights, itemExclusions 중 하나만 채워야 해요.",
-      });
-    }
-  });
-
-export type BatchSplitPatchLlm = z.infer<typeof BatchSplitPatchLlmSchema>;
 
 export function patchKinds(
   patch: Pick<SplitPatch, "exclude" | "only" | "weights" | "itemExclusions">
@@ -138,7 +92,7 @@ export type SplitPatchExpense = {
   items: ReadonlyArray<{ amount?: number | null }>;
 };
 
-type SplitPatchSplitType = "equal" | "ratio" | "fixed";
+export type SplitPatchSplitType = "equal" | "ratio" | "fixed";
 
 export type ApplySplitPatchResult =
   | {
@@ -168,92 +122,6 @@ const REASON_MESSAGES: Record<SplitPatchFailReason, string> = {
 
 export function splitPatchReasonMessage(reason: SplitPatchFailReason): string {
   return REASON_MESSAGES[reason];
-}
-
-/**
- * 익명 게스트는 자기 몫만 바꿀 수 있다 (K7b).
- * weights/only 불가, exclude·itemExclusions 는 요청자 본인만.
- */
-export function guestMayApply(args: {
-  patch: Pick<
-    SplitPatch,
-    "exclude" | "only" | "weights" | "itemExclusions"
-  >;
-  requesterMemberId: string;
-}): { ok: true } | { ok: false; code: "guest-self-only" } {
-  const { patch, requesterMemberId } = args;
-  const kinds = patchKinds(patch);
-  if (kinds.includes("weights") || kinds.includes("only")) {
-    return { ok: false, code: "guest-self-only" };
-  }
-  if (kinds.includes("exclude")) {
-    const ids = [...new Set(patch.exclude)];
-    if (ids.length !== 1 || ids[0] !== requesterMemberId) {
-      return { ok: false, code: "guest-self-only" };
-    }
-  }
-  if (kinds.includes("itemExclusions")) {
-    if (
-      patch.itemExclusions.length === 0 ||
-      patch.itemExclusions.some((e) => e.memberId !== requesterMemberId)
-    ) {
-      return { ok: false, code: "guest-self-only" };
-    }
-  }
-  return { ok: true };
-}
-
-export const GUEST_SELF_ONLY_MESSAGE =
-  "다른 사람의 분담은 호스트만 바꿀 수 있어요.";
-
-/**
- * 멤버 칩 탭 → SplitPatch (LLM 없음). exclude / include 만.
- */
-export function chipToPatch(args: {
-  expenseId: string;
-  memberId: string;
-  action: "exclude" | "include";
-  currentParticipants: readonly string[];
-}):
-  | { ok: true; patch: SplitPatch }
-  | { ok: false; reason: SplitPatchFailReason } {
-  const { expenseId, memberId, action } = args;
-  const participants = [...new Set(args.currentParticipants)];
-
-  if (action === "exclude") {
-    if (!participants.includes(memberId)) {
-      return { ok: false, reason: "no-change" };
-    }
-    if (participants.filter((id) => id !== memberId).length === 0) {
-      return { ok: false, reason: "nobody-left" };
-    }
-    return {
-      ok: true,
-      patch: {
-        expenseId,
-        exclude: [memberId],
-        only: [],
-        weights: [],
-        itemExclusions: [],
-        clarification: null,
-      },
-    };
-  }
-
-  if (participants.includes(memberId)) {
-    return { ok: false, reason: "no-change" };
-  }
-  return {
-    ok: true,
-    patch: {
-      expenseId,
-      exclude: [],
-      only: [...participants, memberId],
-      weights: [],
-      itemExclusions: [],
-      clarification: null,
-    },
-  };
 }
 
 function unique(ids: readonly string[]): string[] {
