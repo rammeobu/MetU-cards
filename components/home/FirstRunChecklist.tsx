@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { QuickTripSheet } from "@/components/trips/QuickTripSheet";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -39,7 +39,6 @@ export function FirstRunChecklist() {
   const [doneStored, setDoneStored] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     setDismissed(readStorageFlag(FIRST_RUN_DISMISSED_KEY));
@@ -78,8 +77,8 @@ export function FirstRunChecklist() {
 
   if (allDone) {
     return (
-      <p role="status" className="text-sm font-semibold text-mu-fg">
-        준비 끝! 이제 알림이 오면 자동으로 기록돼요.
+      <p role="status" className="text-sm font-semibold text-ink-heading">
+        준비 끝! 이제 알림이 오면 자동으로 기록돼요. 🎉
       </p>
     );
   }
@@ -89,75 +88,56 @@ export function FirstRunChecklist() {
     setDismissed(true);
   }
 
-  /** 글자 수와 무관하게 같은 너비·높이 CTA */
   const ctaClass = (emphasize: boolean) =>
     [
-      "mu-focus inline-flex h-11 w-[5.5rem] shrink-0 items-center justify-center rounded-mu-lg px-2 text-center text-sm font-bold",
+      "inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl px-3 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
       emphasize
-        ? "bg-mu-accent text-mu-on-accent"
-        : "bg-mu-sunken text-mu-accent",
+        ? "ai-gradient-bg text-surface-white"
+        : "bg-surface-soft text-brand",
     ].join(" ");
-
-  const rowClass =
-    "grid min-h-14 grid-cols-[1.5rem_minmax(0,1fr)_5.5rem] items-center gap-3";
 
   return (
     <>
       <section
-        aria-label="첫 설정"
-        className="rounded-mu-xl border border-mu-line bg-mu-card p-4"
+        aria-label="시작하기"
+        className="rounded-2xl bg-surface-white p-4 shadow-sm ring-1 ring-line-soft"
       >
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          className="mu-focus flex w-full items-center gap-3 rounded-mu-md text-left"
-        >
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h2 className="text-mu-body font-bold text-mu-fg">첫 설정</h2>
-              <span className="text-mu-caption font-semibold text-mu-fg-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-base font-extrabold text-ink-heading">
+                시작하기
+              </h2>
+              <span className="text-sm font-bold text-ink-body">
                 {doneCount}/3
               </span>
             </div>
-            {expanded ? (
-              <p className="mt-1 text-mu-caption text-mu-fg-3">
-                알림 연결 → 여행 → 지출 순서로 준비해요.
-              </p>
-            ) : (
-              <p className="mt-1 text-mu-caption text-mu-fg-3">
-                눌러서 이어서 준비하기
-              </p>
-            )}
             <div
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={3}
               aria-valuenow={doneCount}
-              aria-label="첫 설정 진행도"
-              className="mt-2 h-2 overflow-hidden rounded-full bg-mu-sunken"
+              aria-label="시작하기 진행도"
+              className="mt-2 h-2 overflow-hidden rounded-full bg-surface-soft"
             >
               <div
-                className="h-full rounded-full bg-mu-accent transition-[width] motion-reduce:transition-none"
+                className="h-full rounded-full bg-brand transition-[width] motion-reduce:transition-none"
                 style={{ width: `${(doneCount / 3) * 100}%` }}
               />
             </div>
           </div>
-          <span
-            aria-hidden
-            className={[
-              "flex h-11 w-11 shrink-0 items-center justify-center text-mu-fg-2 transition-transform duration-mu-fast",
-              expanded ? "rotate-180" : "rotate-0",
-            ].join(" ")}
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center text-sm font-semibold text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
-            <ChevronDown className="h-5 w-5" strokeWidth={2.2} />
-          </span>
-        </button>
+            숨기기
+          </button>
+        </div>
 
-        {expanded ? (
         <ul className="mt-3 flex flex-col gap-2">
           <li
-            className={rowClass}
+            className="flex min-h-[56px] items-start gap-3"
             aria-label={
               connectStep.done
                 ? "카드 알림 자동 기록 연결, 완료"
@@ -165,23 +145,23 @@ export function FirstRunChecklist() {
             }
           >
             <StepDot done={connectStep.done} />
-            <div className="min-w-0">
-              <p className="text-mu-label font-bold text-mu-fg">
-                카드 알림 자동 기록
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink-heading">
+                카드 알림 자동 기록 연결
               </p>
               {connectStep.done ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">연결됐어요</p>
+                <p className="mt-0.5 text-xs text-ink-body">연결됐어요</p>
               ) : effectiveUi === "unverified" ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
+                <p className="mt-0.5 text-xs text-ink-body">
                   연결을 마저 확인해 주세요
                 </p>
               ) : (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
-                  결제 알림이 오면 가계부에 자동으로 적혀요
+                <p className="mt-0.5 text-xs text-ink-body">
+                  결제 알림이 오면 가계부에 자동으로 적혀요 · 약 5분
                 </p>
               )}
               {statusFailed && !connectStep.done ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
+                <p className="mt-0.5 text-xs text-ink-body">
                   상태를 불러오지 못했어요.
                 </p>
               ) : null}
@@ -191,30 +171,38 @@ export function FirstRunChecklist() {
                 href="/onboarding/automation"
                 className={ctaClass(firstIncomplete === "connect")}
               >
-                {effectiveUi === "unverified" ? "이어하기" : "연결하기"}
+                {effectiveUi === "unverified" ? "이어서 하기" : "연결하기"}
               </Link>
-            ) : (
-              <span aria-hidden className="w-[5.5rem]" />
-            )}
+            ) : null}
           </li>
 
           <li
-            className={rowClass}
+            className="flex min-h-[56px] items-start gap-3"
             aria-label={
               tripStep.done ? "첫 여행 만들기, 완료" : "첫 여행 만들기"
             }
           >
             <StepDot done={tripStep.done} />
-            <div className="min-w-0">
-              <p className="text-mu-label font-bold text-mu-fg">첫 여행 만들기</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink-heading">
+                첫 여행 만들기
+              </p>
               {tripStep.done ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
+                <p className="mt-0.5 text-xs text-ink-body">
                   {primaryTrip?.destination ?? "여행"} 여행이 있어요
                 </p>
               ) : (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
-                  알림·지출을 담을 여행을 만들어요
-                </p>
+                <>
+                  <p className="mt-0.5 text-xs text-ink-body">
+                    알림과 지출을 담을 여행이에요 · 30초
+                  </p>
+                  <Link
+                    href="/onboarding"
+                    className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    AI로 일정까지 계획하기
+                  </Link>
+                </>
               )}
             </div>
             {!tripStep.done ? (
@@ -225,24 +213,11 @@ export function FirstRunChecklist() {
               >
                 만들기
               </button>
-            ) : (
-              <span aria-hidden className="w-[5.5rem]" />
-            )}
+            ) : null}
           </li>
 
-          {!tripStep.done ? (
-            <li className="pl-9">
-              <Link
-                href="/onboarding"
-                className="mu-focus inline-flex min-h-11 items-center text-mu-caption font-semibold text-mu-accent"
-              >
-                AI로 일정까지 계획하기
-              </Link>
-            </li>
-          ) : null}
-
           <li
-            className={rowClass}
+            className="flex min-h-[56px] items-start gap-3"
             aria-label={
               expenseStep.done
                 ? "첫 지출 기록하기, 완료"
@@ -250,22 +225,25 @@ export function FirstRunChecklist() {
             }
           >
             <StepDot done={expenseStep.done} />
-            <div className="min-w-0">
-              <p className="text-mu-label font-bold text-mu-fg">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink-heading">
                 첫 지출 기록하기
               </p>
               {expenseStep.done ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
+                <p className="mt-0.5 text-xs text-ink-body">
                   지출이 기록됐어요
                 </p>
-              ) : !primaryTrip ? (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
-                  여행을 만든 뒤 기록할 수 있어요
-                </p>
               ) : (
-                <p className="mt-0.5 text-mu-caption text-mu-fg-2">
-                  알림 자동 기록이나 직접 입력 모두 좋아요
-                </p>
+                <>
+                  <p className="mt-0.5 text-xs text-ink-body">
+                    알림 자동 기록이나 직접 입력 모두 좋아요
+                  </p>
+                  {!primaryTrip ? (
+                    <p className="mt-0.5 text-xs text-ink-body">
+                      먼저 여행을 만들어 주세요.
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
             {!expenseStep.done ? (
@@ -280,29 +258,14 @@ export function FirstRunChecklist() {
                 <button
                   type="button"
                   disabled
-                  className="inline-flex h-11 w-[5.5rem] shrink-0 items-center justify-center rounded-mu-lg bg-mu-sunken px-2 text-sm font-bold text-mu-fg-3 disabled:opacity-60"
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-surface-soft px-3 text-sm font-bold text-ink-caption disabled:opacity-60"
                 >
                   기록하기
                 </button>
               )
-            ) : (
-              <span aria-hidden className="w-[5.5rem]" />
-            )}
+            ) : null}
           </li>
         </ul>
-        ) : null}
-
-        {expanded ? (
-          <div className="mt-3 flex justify-end border-t border-mu-line pt-2">
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="mu-focus inline-flex min-h-11 items-center px-1 text-mu-caption font-medium text-mu-fg-3"
-            >
-              다시 보지 않기
-            </button>
-          </div>
-        ) : null}
       </section>
 
       <QuickTripSheet
@@ -319,10 +282,10 @@ function StepDot({ done }: { done: boolean }) {
     <span
       aria-hidden
       className={[
-        "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
+        "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
         done
-          ? "bg-mu-ok text-mu-on-accent"
-          : "border-2 border-mu-line bg-mu-card",
+          ? "bg-emerald-500 text-white"
+          : "border-2 border-line-muted bg-surface-white",
       ].join(" ")}
     >
       {done ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}

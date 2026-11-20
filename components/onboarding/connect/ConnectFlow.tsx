@@ -12,6 +12,7 @@ import {
 
 import { ConnectError } from "@/components/onboarding/connect/ConnectError";
 import { ConnectHub } from "@/components/onboarding/connect/ConnectHub";
+import { ConnectStepCards } from "@/components/onboarding/connect/ConnectStepCards";
 import { GateNotice } from "@/components/onboarding/connect/GateNotice";
 import { RecentEventsStrip } from "@/components/onboarding/connect/RecentEventsStrip";
 import { StepAutomation } from "@/components/onboarding/connect/StepAutomation";
@@ -21,7 +22,6 @@ import { StepShortcut } from "@/components/onboarding/connect/StepShortcut";
 import { StepVerify } from "@/components/onboarding/connect/StepVerify";
 import { UnsupportedHandoff } from "@/components/onboarding/connect/UnsupportedHandoff";
 import { useClipboardCopy } from "@/components/onboarding/connect/useClipboardCopy";
-import { Stepper, type StepItem } from "@/components/ds/Stepper";
 import { apiFetchJson } from "@/lib/api/fetch-json";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { resolvePostOnboardingPath } from "@/lib/auth/post-login-path";
@@ -33,14 +33,11 @@ import { detectPlatform } from "@/lib/onboarding/automation";
 import { shouldEnterConnectHub } from "@/lib/onboarding/connect-entry";
 import {
   connectReducer,
-  connectStepCards,
   initialConnectState,
   pickVerifyArrival,
   showConnectStepper,
-  stepLabel,
   toSnapshot,
   type ConnectErrorState,
-  type ConnectStepPhase,
 } from "@/lib/onboarding/connect-machine";
 import {
   eventsSince,
@@ -420,29 +417,29 @@ export function ConnectFlow() {
   if (!isReady || !booted) {
     return (
       <div className="space-y-3 p-1" aria-busy="true">
-        <p className="text-sm text-mu-fg-2">기기를 확인하는 중…</p>
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
+        <p className="text-sm text-ink-body">기기를 확인하는 중…</p>
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
       </div>
     );
   }
 
   if (isGuest) {
     return (
-      <div className="rounded-2xl border border-mu-line bg-mu-bg p-5">
-        <p className="text-sm leading-relaxed text-mu-fg">
+      <div className="rounded-2xl border border-line-muted bg-surface-base p-5">
+        <p className="text-sm leading-relaxed text-ink-heading">
           로그인하면 자동 기록을 연결할 수 있어요
         </p>
         <Link
           href="/login?next=/onboarding/automation"
-          className="bg-mu-accent mt-4 inline-flex min-h-[52px] w-full items-center justify-center rounded-2xl text-base font-bold text-mu-on-accent"
+          className="ai-gradient-bg mt-4 inline-flex min-h-[52px] w-full items-center justify-center rounded-2xl text-base font-bold text-surface-white"
         >
           로그인하기
         </Link>
         <Link
           href="/"
-          className="mt-2 inline-flex min-h-11 w-full items-center justify-center text-sm text-mu-fg-2 underline"
+          className="mt-2 inline-flex min-h-11 w-full items-center justify-center text-sm text-ink-body underline"
         >
           홈으로
         </Link>
@@ -452,17 +449,6 @@ export function ConnectFlow() {
 
   const showLater =
     showConnectStepper(state) && state.issueMode === "wizard";
-
-  const stepperItems: StepItem[] = connectStepCards(state).map((card) => ({
-    key: card.phase,
-    label: card.label,
-    status:
-      card.status === "upcoming"
-        ? "todo"
-        : card.status === "done"
-          ? "done"
-          : "current",
-  }));
 
   const sinceEvents = eventsSince(
     status.data?.recentEvents ?? [],
@@ -498,48 +484,33 @@ export function ConnectFlow() {
 
   return (
     <div className="flex flex-col gap-4">
-      {showConnectStepper(state) ? (
-        <div className="-mx-5">
-          <Stepper
-            steps={stepperItems}
-            currentKey={state.phase}
-            title={stepLabel(state)}
-            navAriaLabel="연결 단계"
-            onSelect={(key) =>
-              dispatch({
-                type: "GO_TO_STEP",
-                phase: key as ConnectStepPhase,
-              })
-            }
-          />
-        </div>
-      ) : null}
       <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {showConnectStepper(state) ? (
+            <ConnectStepCards
+              state={state}
+              onGoTo={(phase) => dispatch({ type: "GO_TO_STEP", phase })}
+            />
+          ) : null}
+        </div>
         {showLater ? (
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-mu-fg-2">
-              연결은 나중에 해도 돼요
-            </p>
-            <button
-              type="button"
-              className="min-h-11 px-1 text-sm font-semibold text-mu-fg-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-              disabled={state.busy === "skip"}
-              aria-busy={state.busy === "skip"}
-              onClick={() => void skip()}
-            >
-              나중에 하기
-            </button>
-          </div>
-        ) : (
-          <span className="flex-1" />
-        )}
+          <button
+            type="button"
+            className="min-h-11 shrink-0 px-2 text-sm font-semibold text-ink-body underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            disabled={state.busy === "skip"}
+            aria-busy={state.busy === "skip"}
+            onClick={() => void skip()}
+          >
+            나중에 하기
+          </button>
+        ) : null}
         {state.phase !== "hub" &&
         state.issueMode !== "wizard" &&
         state.phase !== "done" &&
         state.phase !== "skipped" ? (
           <button
             type="button"
-            className="min-h-11 shrink-0 px-2 text-sm font-semibold text-mu-fg-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+            className="min-h-11 shrink-0 px-2 text-sm font-semibold text-ink-body underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={() => {
               clearSnapshot();
               dispatch({ type: "BACK_TO_HUB" });
@@ -697,7 +668,7 @@ export function ConnectFlow() {
       ) : null}
 
       {state.phase === "done" || state.phase === "skipped" ? (
-        <p role="status" className="text-sm text-mu-fg-2">
+        <p role="status" className="text-sm text-ink-body">
           이동하는 중…
         </p>
       ) : null}
