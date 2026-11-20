@@ -7,7 +7,7 @@ import { useAutomationStatus } from "@/lib/hooks/useAutomationStatus";
 import type { AutomationUiState } from "@/lib/onboarding/automation-ui-state";
 import { useTrips } from "@/lib/trips/TripProvider";
 
-type FirstRunStepId = "connect" | "trip" | "expense";
+export type FirstRunStepId = "connect" | "trip" | "expense";
 
 export type FirstRunStep = {
   id: FirstRunStepId;

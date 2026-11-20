@@ -30,14 +30,6 @@ const ExpenseSchema = z.object({
   currency: z.string(),
   fxRateToKrw: MoneyNumber.nullish(),
   krwAmount: MoneyNumber,
-  billedKrw: MoneyNumber.nullish(),
-  /** 시장환율 대비 차이(%). 서버가 계산한 값만. */
-  feePct: MoneyNumber.nullish(),
-});
-
-const HostPayoutSchema = z.object({
-  bank: z.string().min(1),
-  accountNo: z.string().min(1),
 });
 
 const DetailSchema = z.object({
@@ -47,7 +39,6 @@ const DetailSchema = z.object({
   status: z.string(),
   completedAt: z.string().nullish(),
   settledAt: z.string().nullish(),
-  hostPayout: HostPayoutSchema.nullish(),
   members: z.array(MemberSchema),
   transfers: z.array(TransferSchema),
   totals: z.object({
@@ -68,13 +59,6 @@ export type SharedSettlementExpense = {
   currency: string;
   fxRateToKrw: number | null;
   krwAmount: number;
-  billedKrw: number | null;
-  feePct: number | null;
-};
-
-export type SharedSettlementHostPayout = {
-  bank: string;
-  accountNo: string;
 };
 
 export type SharedSettlementDetail = {
@@ -84,8 +68,6 @@ export type SharedSettlementDetail = {
   status: string;
   completedAt: string | null;
   settledAt: string | null;
-  /** 호스트 입금 계좌. 미설정이면 null — 가짜 데모 계좌를 쓰지 않아요. */
-  hostPayout: SharedSettlementHostPayout | null;
   members: Array<{ id: string; displayName: string }>;
   transfers: Array<{ from: string; to: string; krw: number; status: string }>;
   totals: {
@@ -103,7 +85,6 @@ export function parseSharedSettlementDetail(
   const parsed = DetailSchema.safeParse(raw);
   if (!parsed.success) return null;
   const d = parsed.data;
-  const payout = d.hostPayout;
   return {
     destination: d.destination,
     dateRange: d.dateRange,
@@ -111,9 +92,6 @@ export function parseSharedSettlementDetail(
     status: d.status,
     completedAt: d.completedAt ?? null,
     settledAt: d.settledAt ?? null,
-    hostPayout: payout
-      ? { bank: payout.bank.trim(), accountNo: payout.accountNo.trim() }
-      : null,
     members: d.members,
     transfers: d.transfers,
     totals: {
@@ -131,11 +109,6 @@ export function parseSharedSettlementDetail(
       currency: e.currency,
       fxRateToKrw: e.fxRateToKrw ?? null,
       krwAmount: e.krwAmount,
-      billedKrw:
-        typeof e.billedKrw === "number" && e.billedKrw > 0
-          ? e.billedKrw
-          : null,
-      feePct: typeof e.feePct === "number" ? e.feePct : null,
     })),
   };
 }

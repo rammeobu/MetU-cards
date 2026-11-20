@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Sheet } from "@/components/ds/Sheet";
 import { FxAttribution } from "@/components/fx/FxAttribution";
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
 import {
@@ -12,7 +11,7 @@ import { getFxQuote } from "@/lib/ledger/fx";
 import { computeKrw } from "@/lib/ledger/money";
 import { computeShares } from "@/lib/ledger/settle";
 import { listExpenses, saveExpense } from "@/lib/ledger/supabase";
-import type { LedgerExpenseRow, TripMember } from "@/lib/ledger/types";
+import type { TripMember } from "@/lib/ledger/types";
 import { useCurrencyOptions } from "@/lib/fx/currency-list";
 import { formatKRW } from "@/lib/shared/format";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
@@ -33,8 +32,7 @@ type Props = {
   index: number;
   onIndexChange: (i: number) => void;
   onClose: () => void;
-  /** 하위 호환: 인자 없이 호출해도 됨. 저장 행을 넘기면 제안 승인에 재사용. */
-  onSaved: (row?: LedgerExpenseRow) => void;
+  onSaved: () => void;
   cardProfiles?: CardProfile[];
 };
 
@@ -303,7 +301,7 @@ export function ExpenseConfirmSheet({
       }
       if (index + 1 < drafts.length) onIndexChange(index + 1);
       else {
-        onSaved(row);
+        onSaved();
         onClose();
       }
     } finally {
@@ -313,44 +311,52 @@ export function ExpenseConfirmSheet({
 
   if (!draft) return null;
 
-  const title =
-    drafts.length > 1
-      ? `지출 확인 (${index + 1}/${drafts.length})`
-      : "지출 확인";
-
   return (
-    <Sheet
-      open
-      onClose={onClose}
-      title={title}
-      footer={
-        <button
-          type="button"
-          disabled={!canSave || saving}
-          className="min-h-[52px] w-full rounded-xl bg-mu-accent py-3 text-sm font-extrabold text-mu-on-accent disabled:opacity-40"
-          onClick={() => void handleSave()}
-        >
-          {saving ? "저장 중…" : "저장"}
-        </button>
-      }
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
     >
+      <div
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface-white p-4 shadow-xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-extrabold text-ink-heading">
+            지출 확인
+            {drafts.length > 1 ? (
+              <span className="ml-2 text-xs font-semibold text-ink-muted">
+                {index + 1}/{drafts.length}
+              </span>
+            ) : null}
+          </h3>
+          <button
+            type="button"
+            className="text-xs font-bold text-ink-muted"
+            onClick={onClose}
+          >
+            닫기
+          </button>
+        </div>
+
         {dupes.length > 0 && !ignoreDupes ? (
-          <div className="mb-3 rounded-xl border border-mu-warn bg-mu-warn-soft px-3 py-2 text-xs">
-            <p className="font-bold text-mu-warn">같은 결제 같아요</p>
-            <p className="mt-1 text-mu-warn">
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+            <p className="font-bold text-amber-900">같은 결제 같아요</p>
+            <p className="mt-1 text-amber-800">
               후보 {dupes.length}건 · 점수 {dupes[0]!.score}
             </p>
             <div className="mt-2 flex gap-2">
               <button
                 type="button"
-                className="font-bold text-mu-warn underline"
+                className="font-bold text-amber-900 underline"
                 onClick={onClose}
               >
                 합치기(저장 취소)
               </button>
               <button
                 type="button"
-                className="font-bold text-mu-warn underline"
+                className="font-bold text-amber-900 underline"
                 onClick={() => setIgnoreDupes(true)}
               >
                 다른 결제예요
@@ -362,19 +368,19 @@ export function ExpenseConfirmSheet({
         {(draft.warnings?.length || (feeUnset && paymentMethod === "card")) && (
           <ul className="mb-3 flex flex-col gap-1">
             {draft.timeIsEstimated ? (
-              <li className="rounded-md bg-mu-warn-soft px-2 py-1 text-xs font-semibold text-mu-warn">
+              <li className="rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
                 시간 추정
               </li>
             ) : null}
             {feeUnset && paymentMethod === "card" ? (
-              <li className="rounded-md bg-mu-warn-soft px-2 py-1 text-xs font-semibold text-mu-warn">
+              <li className="rounded-md bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
                 수수료 미설정
               </li>
             ) : null}
             {(draft.warnings ?? []).map((w) => (
               <li
                 key={w}
-                className="rounded-md bg-mu-sunken px-2 py-1 text-[11px] font-semibold text-mu-fg-2"
+                className="rounded-md bg-surface-soft px-2 py-1 text-[11px] font-semibold text-ink-body"
               >
                 {w}
               </li>
@@ -386,7 +392,7 @@ export function ExpenseConfirmSheet({
           <label className="flex flex-col gap-1">
             <span className="text-xs font-bold">상호(원문)</span>
             <input
-              className="rounded-lg border border-mu-line px-3 py-2"
+              className="rounded-lg border border-line px-3 py-2"
               value={merchant}
               onChange={(e) => setMerchant(e.target.value)}
             />
@@ -394,7 +400,7 @@ export function ExpenseConfirmSheet({
           <label className="flex flex-col gap-1">
             <span className="text-xs font-bold">상호(한국어)</span>
             <input
-              className="rounded-lg border border-mu-line px-3 py-2"
+              className="rounded-lg border border-line px-3 py-2"
               value={merchantKo}
               onChange={(e) => setMerchantKo(e.target.value)}
             />
@@ -404,7 +410,7 @@ export function ExpenseConfirmSheet({
               <span className="text-xs font-bold">금액</span>
               <input
                 inputMode="decimal"
-                className="rounded-lg border border-mu-line px-3 py-2"
+                className="rounded-lg border border-line px-3 py-2"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
@@ -412,7 +418,7 @@ export function ExpenseConfirmSheet({
             <label className="flex flex-col gap-1">
               <span className="text-xs font-bold">통화</span>
               <select
-                className="rounded-lg border border-mu-line px-3 py-2"
+                className="rounded-lg border border-line px-3 py-2"
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
               >
@@ -431,7 +437,7 @@ export function ExpenseConfirmSheet({
             <span className="text-xs font-bold">날짜</span>
             <input
               type="date"
-              className="rounded-lg border border-mu-line px-3 py-2"
+              className="rounded-lg border border-line px-3 py-2"
               value={spentOn}
               onChange={(e) => setSpentOn(e.target.value)}
             />
@@ -439,7 +445,7 @@ export function ExpenseConfirmSheet({
           <label className="flex flex-col gap-1">
             <span className="text-xs font-bold">카테고리</span>
             <select
-              className="rounded-lg border border-mu-line px-3 py-2"
+              className="rounded-lg border border-line px-3 py-2"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
             >
@@ -457,8 +463,8 @@ export function ExpenseConfirmSheet({
                 type="button"
                 className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
                   paymentMethod === m
-                    ? "bg-mu-accent text-mu-on-accent"
-                    : "bg-mu-sunken text-mu-fg-2"
+                    ? "bg-brand text-white"
+                    : "bg-surface-soft text-ink-body"
                 }`}
                 onClick={() => setPaymentMethod(m)}
               >
@@ -470,7 +476,7 @@ export function ExpenseConfirmSheet({
             <label className="flex flex-col gap-1">
               <span className="text-xs font-bold">카드 프로필</span>
               <select
-                className="rounded-lg border border-mu-line px-3 py-2"
+                className="rounded-lg border border-line px-3 py-2"
                 value={cardProfileId}
                 onChange={(e) => setCardProfileId(e.target.value)}
               >
@@ -486,7 +492,7 @@ export function ExpenseConfirmSheet({
           <label className="flex flex-col gap-1">
             <span className="text-xs font-bold">결제자</span>
             <select
-              className="rounded-lg border border-mu-line px-3 py-2"
+              className="rounded-lg border border-line px-3 py-2"
               value={payerId}
               onChange={(e) => setPayerId(e.target.value)}
             >
@@ -506,7 +512,7 @@ export function ExpenseConfirmSheet({
                   <label
                     key={m.id}
                     className={`cursor-pointer rounded-lg px-2 py-1 text-xs font-semibold ${
-                      on ? "bg-mu-accent/15 text-mu-accent" : "bg-mu-sunken"
+                      on ? "bg-brand/15 text-brand" : "bg-surface-soft"
                     }`}
                   >
                     <input
@@ -529,15 +535,15 @@ export function ExpenseConfirmSheet({
           </fieldset>
 
           {breakdown && fxRate != null ? (
-            <div className="rounded-xl bg-mu-sunken px-3 py-2 text-xs">
-              <p className="font-bold text-mu-fg">
+            <div className="rounded-xl bg-surface-soft px-3 py-2 text-xs">
+              <p className="font-bold text-ink-heading">
                 약 {formatKRW(breakdown.krwBase)}
                 {breakdown.feeKrw > 0
                   ? ` + 수수료 ${formatKRW(breakdown.feeKrw)}`
                   : ""}{" "}
                 = {formatKRW(breakdown.krwAmount)}
               </p>
-              <p className="mt-1 text-mu-fg-3">
+              <p className="mt-1 text-ink-muted">
                 환율 {fxRate}
                 {fxMeta?.rateDate
                   ? fxMeta.isFallback
@@ -551,7 +557,7 @@ export function ExpenseConfirmSheet({
                 <span>환율 직접 수정</span>
                 <input
                   inputMode="decimal"
-                  className="w-28 rounded border border-mu-line px-2 py-1"
+                  className="w-28 rounded border border-line px-2 py-1"
                   value={String(fxRate)}
                   onChange={(e) => {
                     const n = Number(e.target.value);
@@ -562,8 +568,8 @@ export function ExpenseConfirmSheet({
               <FxAttribution />
             </div>
           ) : (
-            <div className="rounded-xl bg-mu-sunken px-3 py-2 text-xs">
-              <p className="font-semibold text-mu-err">
+            <div className="rounded-xl bg-surface-soft px-3 py-2 text-xs">
+              <p className="font-semibold text-danger">
                 {paymentMethod === "cash"
                   ? "현금 환율을 입력하거나 설정해 주세요."
                   : fxLoadFailed
@@ -575,7 +581,7 @@ export function ExpenseConfirmSheet({
                   <span>1 {currency} =</span>
                   <input
                     inputMode="decimal"
-                    className="w-28 rounded border border-mu-line-strong bg-mu-card px-2 py-1"
+                    className="w-28 rounded border border-line px-2 py-1"
                     value={manualFxDraft}
                     placeholder="원화"
                     onChange={(e) => {
@@ -602,8 +608,18 @@ export function ExpenseConfirmSheet({
         </div>
 
         {error ? (
-          <p className="mt-2 text-xs font-semibold text-mu-err">{error}</p>
+          <p className="mt-2 text-xs font-semibold text-danger">{error}</p>
         ) : null}
-    </Sheet>
+
+        <button
+          type="button"
+          disabled={!canSave || saving}
+          className="mt-4 w-full rounded-xl bg-brand py-3 text-sm font-extrabold text-white disabled:opacity-40"
+          onClick={() => void handleSave()}
+        >
+          {saving ? "저장 중…" : "저장"}
+        </button>
+      </div>
+    </div>
   );
 }

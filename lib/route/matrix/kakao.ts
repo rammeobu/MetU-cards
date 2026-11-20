@@ -28,7 +28,7 @@ function dailyBudget(): number {
 }
 
 /** 서버리스 인스턴스별 근사 카운터 — 합계는 카카오 쿼터 화면에서 확인 */
-function canSpendKakaoRouteQuota(cost = 1): boolean {
+export function canSpendKakaoRouteQuota(cost = 1): boolean {
   const day = todayKey();
   if (day !== dailyDate) {
     dailyDate = day;

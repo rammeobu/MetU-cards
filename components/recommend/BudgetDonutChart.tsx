@@ -1,4 +1,3 @@
-import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { formatKRW } from "@/lib/shared/format";
 import type { BudgetAllocation } from "@/lib/ai/types";
 
@@ -42,7 +41,7 @@ export function BudgetDonutChart({
             총 예산
           </p>
           <p className="mt-1 max-w-full truncate text-[11px] font-extrabold leading-tight tracking-tight text-ink-heading">
-            <AnimatedNumber value={totalBudget} duration={900} />
+            {formatKRW(totalBudget)}
           </p>
           <p className="mt-0.5 text-[9px] font-medium leading-none text-ink-caption">
             {people}인

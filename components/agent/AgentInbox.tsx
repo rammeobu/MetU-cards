@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Sheet } from "@/components/ds/Sheet";
 import { MobileShell } from "@/components/layout/MobileShell";
 import { QuickTripSheet } from "@/components/trips/QuickTripSheet";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -43,7 +42,6 @@ type ResultItem = {
     merchant?: string | null;
     amount?: number | null;
     currency?: string | null;
-    spentOn?: string | null;
   };
   priced?: { krwAmount?: number; amount?: number; currency?: string };
 };
@@ -120,16 +118,10 @@ function looksLikeJwtExpired(message: string): boolean {
 export function AgentInbox({
   tripId,
   trips: tripsProp,
-  embedded = false,
 }: {
   /** When omitted, shows all of the user's events (user-scoped inbox). */
   tripId?: string | null;
   trips?: TripOption[];
-  /**
-   * true면 MobileShell·바깥 패딩 없이 본문만.
-   * 여행 확인함(`LedgerInboxClient`)이 쉘을 소유할 때 사용.
-   */
-  embedded?: boolean;
 }) {
   const { user, provider, isReady: authReady, isLoggedIn } = useAuth();
   const isGuest = provider === "guest" || !user;
@@ -147,10 +139,14 @@ export function AgentInbox({
     [tripsProp, activeTrips]
   );
   const automationEnabled = authReady && isLoggedIn && !isGuest;
-  const { uiState } = useAutomationStatus({
+  const { data: automationData, uiState } = useAutomationStatus({
     enabled: automationEnabled,
     lite: true,
   });
+  const showBottomNav =
+    automationData?.status === "done" ||
+    automationData?.status === "partial" ||
+    automationData?.status === "skipped";
 
   const [events, setEvents] = useState<AgentEventRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,12 +158,6 @@ export function AgentInbox({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [editEvent, setEditEvent] = useState<AgentEventRow | null>(null);
-  const [editText, setEditText] = useState("");
-  const [editMerchant, setEditMerchant] = useState("");
-  const [editAmount, setEditAmount] = useState("");
-  const [editCurrency, setEditCurrency] = useState("KRW");
-  const [editSpentOn, setEditSpentOn] = useState("");
   const [bulk, setBulk] = useState<{
     tripId: string;
     done: number;
@@ -416,66 +406,6 @@ export function AgentInbox({
     if (!res.ok) throw new Error(json.error ?? "request-failed");
   }
 
-  function canEditDraft(status: string): boolean {
-    return [
-      "needs_review",
-      "failed",
-      "ignored",
-      "unassigned",
-      "received",
-    ].includes(status);
-  }
-
-  function openEdit(event: AgentEventRow) {
-    const review = reviewItems(event)[0];
-    setEditEvent(event);
-    setEditText(
-      typeof event.payload?.text === "string" ? event.payload.text : ""
-    );
-    setEditMerchant(review?.draft?.merchant ?? "");
-    setEditAmount(
-      review?.draft?.amount != null ? String(review.draft.amount) : ""
-    );
-    setEditCurrency(
-      (review?.draft?.currency ?? "KRW").toString().toUpperCase() || "KRW"
-    );
-    const spent =
-      typeof review?.draft?.spentOn === "string" ? review.draft.spentOn : "";
-    setEditSpentOn(/^\d{4}-\d{2}-\d{2}$/.test(spent) ? spent : "");
-  }
-
-  async function saveEdit() {
-    if (!editEvent) return;
-    const body: {
-      text?: string;
-      draft?: {
-        merchant?: string;
-        amount?: number;
-        currency?: string;
-        spentOn?: string;
-      };
-    } = {};
-    if (editText.trim()) body.text = editText.trim();
-    if (canEditDraft(editEvent.status)) {
-      const draft: NonNullable<(typeof body)["draft"]> = {};
-      if (editMerchant.trim()) draft.merchant = editMerchant.trim();
-      const amt = Number(editAmount.replace(/,/g, ""));
-      if (Number.isFinite(amt) && amt > 0) draft.amount = amt;
-      if (editCurrency.trim().length === 3) {
-        draft.currency = editCurrency.trim().toUpperCase();
-      }
-      if (/^\d{4}-\d{2}-\d{2}$/.test(editSpentOn.trim())) {
-        draft.spentOn = editSpentOn.trim();
-      }
-      if (Object.keys(draft).length > 0) body.draft = draft;
-    }
-    if (!body.text && !body.draft) return;
-    await withBusy(editEvent.id, () =>
-      post(`/api/agent/events/${editEvent.id}/edit`, body)
-    );
-    setEditEvent(null);
-  }
-
   async function withBusy(id: string, fn: () => Promise<void>) {
     setBusyId(id);
     setRowErrors((prev) => {
@@ -510,7 +440,7 @@ export function AgentInbox({
       return (
         <button
           type="button"
-          className="mt-2 inline-flex min-h-11 items-center rounded-lg bg-mu-accent px-3 text-xs font-bold text-mu-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+          className="mt-2 inline-flex min-h-11 items-center rounded-lg bg-brand px-3 text-xs font-bold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           onClick={() => setSheetOpen(true)}
         >
           여행 만들기
@@ -528,7 +458,7 @@ export function AgentInbox({
           <button
             type="button"
             disabled={busyId === event.id || bulk?.running === true}
-            className="mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-mu-accent px-3 py-2 text-sm font-bold text-mu-on-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+            className="mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={() =>
               void withBusy(event.id, () =>
                 post(`/api/agent/events/${event.id}/assign`, {
@@ -541,11 +471,11 @@ export function AgentInbox({
           </button>
         ) : null}
         <label className="mt-2 flex flex-col gap-1 text-xs">
-          <span className="font-bold text-mu-fg">
+          <span className="font-bold text-ink-heading">
             {suggestion ? "다른 여행에 배정" : "여행에 배정"}
           </span>
           <select
-            className="min-h-11 rounded-lg border border-mu-line px-3 py-2 text-sm"
+            className="min-h-11 rounded-lg border border-line px-3 py-2 text-sm"
             defaultValue=""
             disabled={busyId === event.id}
             onChange={(e) => {
@@ -575,55 +505,10 @@ export function AgentInbox({
     );
   }
 
-  function renderManageButtons(event: AgentEventRow) {
-    const disabled = busyId === event.id;
-    if (event.status === "processing") return null;
-    const hasLinkedExpense =
-      event.status === "auto" ||
-      event.status === "done" ||
-      autoItems(event).length > 0 ||
-      mergedItems(event).length > 0;
-    return (
-      <>
-        <button
-          type="button"
-          disabled={disabled}
-          className="min-h-11 rounded-lg border border-mu-line px-3 py-1.5 text-xs font-bold text-mu-fg-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-          onClick={() => openEdit(event)}
-        >
-          수정
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          className="min-h-11 rounded-lg border border-mu-err/40 px-3 py-1.5 text-xs font-bold text-mu-err disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-          onClick={() => {
-            const msg = hasLinkedExpense
-              ? "확인함에서만 지울까요? 이미 가계부에 들어간 지출은 그대로 남아요."
-              : "이 알림을 확인함에서 완전히 삭제할까요? (「나중에」와 달리 되돌릴 수 없어요)";
-            if (typeof window !== "undefined" && !window.confirm(msg)) {
-              return;
-            }
-            void withBusy(event.id, () =>
-              post(`/api/agent/events/${event.id}/delete`)
-            );
-          }}
-        >
-          삭제
-        </button>
-      </>
-    );
-  }
-
   function renderActions(event: AgentEventRow) {
     const disabled = busyId === event.id;
     if (event.status === "unassigned") {
-      return (
-        <div className="mt-2 flex flex-col gap-2">
-          {renderAssign(event)}
-          <div className="flex flex-wrap gap-2">{renderManageButtons(event)}</div>
-        </div>
-      );
+      return renderAssign(event);
     }
     if (event.status === "needs_review") {
       const reviews = reviewItems(event);
@@ -635,7 +520,7 @@ export function AgentInbox({
             <button
               type="button"
               disabled={disabled}
-              className="min-h-11 rounded-lg bg-mu-accent px-3 py-1.5 text-xs font-bold text-mu-on-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+              className="min-h-11 rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               onClick={() =>
                 void withBusy(event.id, () =>
                   post(`/api/agent/events/${event.id}/confirm`, {
@@ -650,10 +535,10 @@ export function AgentInbox({
           <button
             type="button"
             disabled={disabled}
-            className={`min-h-11 rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent ${
+            className={`min-h-11 rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
               canMerge
-                ? "bg-mu-sunken text-mu-fg-2"
-                : "bg-mu-accent text-mu-on-accent"
+                ? "bg-surface-soft text-ink-body"
+                : "bg-brand text-white"
             }`}
             onClick={() =>
               void withBusy(event.id, () =>
@@ -666,17 +551,15 @@ export function AgentInbox({
           <button
             type="button"
             disabled={disabled}
-            title="목록 아래로 접어 두고, 나중에 다시 볼 수 있어요"
-            className="min-h-11 rounded-lg bg-mu-sunken px-3 py-1.5 text-xs font-bold text-mu-fg-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+            className="min-h-11 rounded-lg bg-surface-soft px-3 py-1.5 text-xs font-bold text-ink-body disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={() =>
               void withBusy(event.id, () =>
                 post(`/api/agent/events/${event.id}/dismiss`)
               )
             }
           >
-            나중에
+            무시
           </button>
-          {renderManageButtons(event)}
         </div>
       );
     }
@@ -686,7 +569,7 @@ export function AgentInbox({
           <button
             type="button"
             disabled={disabled}
-            className="min-h-11 rounded-lg bg-mu-accent px-3 py-1.5 text-xs font-bold text-mu-on-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+            className="min-h-11 rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={() =>
               void withBusy(event.id, () =>
                 post(`/api/agent/events/${event.id}/retry`)
@@ -698,37 +581,19 @@ export function AgentInbox({
           <button
             type="button"
             disabled={disabled}
-            title="목록 아래로 접어 두고, 나중에 다시 볼 수 있어요"
-            className="min-h-11 rounded-lg bg-mu-sunken px-3 py-1.5 text-xs font-bold text-mu-fg-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+            className="min-h-11 rounded-lg bg-surface-soft px-3 py-1.5 text-xs font-bold text-ink-body disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={() =>
               void withBusy(event.id, () =>
                 post(`/api/agent/events/${event.id}/dismiss`)
               )
             }
           >
-            나중에
+            무시
           </button>
-          {renderManageButtons(event)}
         </div>
       );
     }
-    if (
-      event.status === "ignored" ||
-      event.status === "received" ||
-      event.status === "auto" ||
-      event.status === "done"
-    ) {
-      return (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {renderManageButtons(event)}
-        </div>
-      );
-    }
-    return (
-      <div className="mt-2 flex flex-wrap gap-2">
-        {renderManageButtons(event)}
-      </div>
-    );
+    return null;
   }
 
   function renderAutoUndo(event: AgentEventRow) {
@@ -739,9 +604,9 @@ export function AgentInbox({
         {autos.map((it) => (
           <li
             key={`${event.id}-${it.ref}-${it.expenseId}`}
-            className="flex items-center justify-between rounded-lg bg-mu-sunken px-2 py-1.5 text-xs"
+            className="flex items-center justify-between rounded-lg bg-surface-soft px-2 py-1.5 text-xs"
           >
-            <span className="text-mu-fg-2">
+            <span className="text-ink-body">
               {it.draft?.merchant ?? "지출"}{" "}
               {it.priced?.krwAmount != null
                 ? formatKRW(it.priced.krwAmount)
@@ -752,7 +617,7 @@ export function AgentInbox({
             <button
               type="button"
               disabled={busyId === it.expenseId}
-              className="min-h-11 font-bold text-mu-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+              className="min-h-11 font-bold text-brand disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               onClick={() =>
                 void withBusy(it.expenseId!, () =>
                   post(`/api/agent/expenses/${it.expenseId}/undo`)
@@ -786,16 +651,16 @@ export function AgentInbox({
     return (
       <article
         key={event.id}
-        className={`rounded-2xl border p-3 ${tone} ${
+        className={`rounded-2xl border p-3 shadow-sm ${tone} ${
           test ? "opacity-70" : ""
         }`}
       >
         <div className="flex items-start justify-between gap-2">
-          <span className="rounded-full bg-mu-card/80 px-2 py-0.5 text-xs font-bold tracking-wide text-mu-fg-2">
+          <span className="rounded-full bg-surface-white/80 px-2 py-0.5 text-xs font-bold tracking-wide text-ink-body">
             {test ? "연결 테스트" : displayLabel}
           </span>
           <time
-            className="text-xs text-mu-fg-2"
+            className="text-xs text-ink-body"
             dateTime={event.created_at}
             title={new Date(event.created_at).toLocaleString("ko-KR", {
               timeZone: "Asia/Seoul",
@@ -813,7 +678,7 @@ export function AgentInbox({
           </time>
         </div>
         {event.status === "unassigned" ? (
-          <p className="mt-2 text-xs leading-relaxed text-mu-warn">
+          <p className="mt-2 text-xs leading-relaxed text-amber-900">
             {
               unassignedNote({
                 hasTrips: trips.length > 0,
@@ -824,7 +689,7 @@ export function AgentInbox({
           </p>
         ) : null}
         {event.status === "failed" && !test ? (
-          <p role="status" className="mt-2 text-xs leading-relaxed text-mu-err">
+          <p role="status" className="mt-2 text-xs leading-relaxed text-danger">
             {agentEventReasonLine({
               status: event.status,
               reason: event.result?.reason,
@@ -832,37 +697,37 @@ export function AgentInbox({
             })}
           </p>
         ) : null}
-        <p className="mt-2 text-sm font-semibold text-mu-fg">
+        <p className="mt-2 text-sm font-semibold text-ink-heading">
           {previewText(event)}
         </p>
         {event.result?.preview
           ? (() => {
               const previewLabel = formatSmsPreviewLabel(event.result.preview!);
               return previewLabel ? (
-                <p className="mt-1 text-xs font-semibold text-mu-accent">
+                <p className="mt-1 text-xs font-semibold text-brand">
                   {previewLabel}
                 </p>
               ) : null;
             })()
           : null}
         {rowErrors[event.id] ? (
-          <p role="alert" className="mt-1 text-xs text-mu-err">
+          <p role="alert" className="mt-1 text-xs text-danger">
             {rowErrors[event.id]}
           </p>
         ) : null}
         {reviews.length > 0 ? (
-          <ul className="mt-2 space-y-1 text-xs text-mu-fg-2">
+          <ul className="mt-2 space-y-1 text-xs text-ink-body">
             {reviews.map((it) => (
               <li key={`${event.id}-r-${it.ref}`}>
                 {agentReasonMessage(it.reasonCode) ||
                   (it.reasons ?? []).join(" · ") ||
-                  `${it.draft?.merchant ?? "항목"} 확인이 필요해요`}
+                  `${it.draft?.merchant ?? "항목"} 확인 필요`}
               </li>
             ))}
           </ul>
         ) : null}
         {mergedItems(event).length > 0 ? (
-          <p className="mt-2 text-xs font-semibold text-mu-ok">
+          <p className="mt-2 text-xs font-semibold text-emerald-800">
             이미 있는 지출에 영수증을 붙였어요
           </p>
         ) : null}
@@ -875,32 +740,34 @@ export function AgentInbox({
   const connectHref = tripId
     ? `/trips/${tripId}/ledger/connect`
     : "/onboarding/automation";
-  const backHref = tripId ? `/trips/${tripId}/ledger` : "/trips";
+  const backHref = tripId ? `/trips/${tripId}/ledger` : "/agent";
   const connected = uiState === "ok" || uiState === "silent";
   const unassignedCount = groups.unassigned.length;
   const noTrips = allTrips.length === 0 && trips.length === 0;
 
-  const body = (
-      <>
-        {!embedded ? (
-          <p className="text-xs leading-relaxed text-mu-fg-2">
-            확정 전 대기열이에요. 확인하면 가계부에 들어가요.
-          </p>
-        ) : null}
+  return (
+    <MobileShell
+      title="수신함"
+      showBack
+      backHref={backHref}
+      showBottomNav={showBottomNav}
+    >
+      <div className="mx-auto flex w-full max-w-lg flex-col gap-4 px-4 py-4">
+        <p className="text-xs leading-relaxed text-ink-body">
+          받은 카드 알림
+        </p>
 
         {isGuest ? (
-          <section className="rounded-2xl border border-mu-line bg-mu-card p-5 text-center">
-            <h2 className="text-base font-extrabold text-mu-fg">
+          <section className="rounded-2xl bg-surface-white p-5 text-center shadow-sm ring-1 ring-line-soft">
+            <h2 className="text-base font-extrabold text-ink-heading">
               로그인하면 받은 알림을 볼 수 있어요
             </h2>
-            <p className="mt-2 text-sm leading-relaxed text-mu-fg-2">
+            <p className="mt-2 text-sm leading-relaxed text-ink-body">
               카드·은행 알림을 자동으로 모아 가계부에 넣어 드려요.
             </p>
             <Link
-              href={`/login?next=${encodeURIComponent(
-                tripId ? `/trips/${tripId}/ledger/inbox` : "/agent/inbox"
-              )}`}
-              className="bg-mu-accent mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl text-sm font-bold text-mu-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+              href="/login?next=/agent/inbox"
+              className="ai-gradient-bg mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl text-sm font-bold text-surface-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               로그인하기
             </Link>
@@ -911,10 +778,10 @@ export function AgentInbox({
               <button
                 type="button"
                 aria-pressed={filterUnassigned}
-                className={`min-h-11 rounded-xl px-3 py-2 text-left text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent ${
+                className={`min-h-11 rounded-xl px-3 py-2 text-left text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
                   filterUnassigned
-                    ? "bg-mu-accent text-mu-on-accent"
-                    : "bg-mu-warn-soft text-mu-warn ring-1 ring-mu-warn/30"
+                    ? "bg-brand text-white"
+                    : "bg-amber-50 text-amber-900 ring-1 ring-amber-200"
                 }`}
                 onClick={() => setFilterUnassigned((v) => !v)}
               >
@@ -925,16 +792,16 @@ export function AgentInbox({
             ) : null}
 
             {noTrips && unassignedCount > 0 ? (
-              <section className="rounded-2xl bg-mu-warn-soft px-4 py-3 ring-1 ring-mu-warn/30">
-                <p className="text-sm font-extrabold text-mu-warn">
+              <section className="rounded-2xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+                <p className="text-sm font-extrabold text-amber-950">
                   여행이 없어서 알림 {unassignedCount}건을 보관 중이에요
                 </p>
-                <p className="mt-1 text-sm text-mu-warn">
+                <p className="mt-1 text-sm text-amber-900">
                   여행을 만들면 기간이 맞는 알림이 자동으로 붙어요.
                 </p>
                 <button
                   type="button"
-                  className="mt-2 inline-flex min-h-11 items-center rounded-xl bg-mu-card px-3 text-sm font-bold text-mu-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+                  className="mt-2 inline-flex min-h-11 items-center rounded-xl bg-surface-white px-3 text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                   onClick={() => setSheetOpen(true)}
                 >
                   여행 만들기
@@ -945,14 +812,14 @@ export function AgentInbox({
             {error ? (
               <div
                 role="alert"
-                className="rounded-lg bg-mu-err-soft px-3 py-3 text-sm font-semibold text-mu-err"
+                className="rounded-lg bg-danger/10 px-3 py-3 text-sm font-semibold text-danger"
               >
                 <p>{error}</p>
                 <button
                   type="button"
                   disabled={reloadBusy}
                   aria-busy={reloadBusy || undefined}
-                  className="mt-2 inline-flex min-h-11 items-center font-bold text-mu-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent disabled:opacity-60"
+                  className="mt-2 inline-flex min-h-11 items-center font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60"
                   onClick={() => {
                     setReloadBusy(true);
                     void load().finally(() => setReloadBusy(false));
@@ -964,7 +831,7 @@ export function AgentInbox({
             ) : null}
 
             {offlineHint && events.length === 0 ? (
-              <p role="status" className="text-sm text-mu-fg-2">
+              <p role="status" className="text-sm text-ink-body">
                 인터넷 연결을 확인해 주세요.
               </p>
             ) : null}
@@ -973,24 +840,24 @@ export function AgentInbox({
               <div
                 role="status"
                 aria-label="불러오는 중"
-                className="h-40 animate-pulse rounded-2xl bg-mu-sunken motion-reduce:animate-none"
+                className="h-40 animate-pulse rounded-2xl bg-surface-soft motion-reduce:animate-none"
               />
             ) : (
               <>
                 {groups.unassignedCards.length > 0 ? (
                   <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-extrabold text-mu-fg">
+                    <h2 className="text-sm font-extrabold text-ink-heading">
                       미할당
                     </h2>
                     {bulkGroups.map((g) => (
                       <div
                         key={g.tripId}
-                        className="rounded-2xl border border-mu-accent/20 bg-mu-accent-soft p-3"
+                        className="rounded-2xl border border-brand/20 bg-brand/5 p-3"
                       >
                         <button
                           type="button"
                           disabled={bulk?.running === true}
-                          className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-mu-accent px-3 py-2 text-sm font-bold text-mu-on-accent disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+                          className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                           onClick={() => void attachAll(g.tripId, g.ids)}
                         >
                           {g.ids.length}건 모두 {g.name}에 붙이기
@@ -999,14 +866,14 @@ export function AgentInbox({
                           bulk.running ? (
                             <p
                               role="status"
-                              className="mt-2 text-xs text-mu-fg-2"
+                              className="mt-2 text-xs text-ink-body"
                             >
                               붙이는 중이에요 ({bulk.done}/{bulk.total})
                             </p>
                           ) : bulk.failed > 0 ? (
                             <p
                               role="alert"
-                              className="mt-2 text-xs font-semibold text-mu-err"
+                              className="mt-2 text-xs font-semibold text-danger"
                             >
                               {bulk.total}건 중 {bulk.failed}건을 붙이지
                               못했어요. 다시 시도해 주세요.
@@ -1014,7 +881,7 @@ export function AgentInbox({
                           ) : (
                             <p
                               role="status"
-                              className="mt-2 text-xs font-semibold text-mu-ok"
+                              className="mt-2 text-xs font-semibold text-emerald-800"
                             >
                               {bulk.total}건을 모두 붙였어요
                             </p>
@@ -1027,7 +894,7 @@ export function AgentInbox({
                         key={e.id}
                         event={e}
                         label="미할당"
-                        tone="border-mu-warn/30 bg-mu-warn-soft/80"
+                        tone="border-amber-200 bg-amber-50/80"
                       />
                     ))}
                   </section>
@@ -1035,7 +902,7 @@ export function AgentInbox({
 
                 {groups.processing.length > 0 ? (
                   <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-extrabold text-mu-fg">
+                    <h2 className="text-sm font-extrabold text-ink-heading">
                       처리 중
                     </h2>
                     {groups.processing.map((e) => (
@@ -1043,7 +910,7 @@ export function AgentInbox({
                         key={e.id}
                         event={e}
                         label="처리 중"
-                        tone="border-mu-accent/20 bg-mu-accent-soft"
+                        tone="border-brand/20 bg-brand/5"
                       />
                     ))}
                   </section>
@@ -1051,15 +918,15 @@ export function AgentInbox({
 
                 {groups.review.length > 0 ? (
                   <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-extrabold text-mu-fg">
-                      확인이 필요해요
+                    <h2 className="text-sm font-extrabold text-ink-heading">
+                      확인 필요
                     </h2>
                     {groups.review.map((e) => (
                       <EventCard
                         key={e.id}
                         event={e}
-                        label="확인이 필요해요"
-                        tone="border-mu-warn/30 bg-mu-warn-soft/80"
+                        label="확인 필요"
+                        tone="border-amber-200 bg-amber-50/80"
                       />
                     ))}
                   </section>
@@ -1067,7 +934,7 @@ export function AgentInbox({
 
                 {groups.failed.length > 0 ? (
                   <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-extrabold text-mu-fg">
+                    <h2 className="text-sm font-extrabold text-ink-heading">
                       실패
                     </h2>
                     {groups.failed.map((e) => (
@@ -1075,7 +942,7 @@ export function AgentInbox({
                         key={e.id}
                         event={e}
                         label="실패"
-                        tone="border-mu-err/30 bg-mu-err-soft"
+                        tone="border-danger/30 bg-danger/5"
                       />
                     ))}
                   </section>
@@ -1083,7 +950,7 @@ export function AgentInbox({
 
                 {groups.autoDone.length > 0 ? (
                   <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-extrabold text-mu-fg">
+                    <h2 className="text-sm font-extrabold text-ink-heading">
                       자동 추가됨
                     </h2>
                     {groups.autoDone.map((e) => (
@@ -1091,7 +958,7 @@ export function AgentInbox({
                         key={e.id}
                         event={e}
                         label="자동 추가"
-                        tone="border-mu-ok/30 bg-mu-ok-soft/60"
+                        tone="border-emerald-200 bg-emerald-50/60"
                       />
                     ))}
                   </section>
@@ -1101,10 +968,10 @@ export function AgentInbox({
                   <section className="flex flex-col gap-2">
                     <button
                       type="button"
-                      className="flex min-h-11 items-center justify-between text-sm font-extrabold text-mu-fg-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+                      className="flex min-h-11 items-center justify-between text-sm font-extrabold text-ink-body focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                       onClick={() => setIgnoredOpen((v) => !v)}
                     >
-                      <span>나중에 ({groups.ignored.length})</span>
+                      <span>무시됨 ({groups.ignored.length})</span>
                       <span>{ignoredOpen ? "▲" : "▼"}</span>
                     </button>
                     {ignoredOpen
@@ -1112,8 +979,8 @@ export function AgentInbox({
                           <EventCard
                             key={e.id}
                             event={e}
-                            label="나중에"
-                            tone="border-mu-line bg-mu-sunken/50 opacity-80"
+                            label="무시"
+                            tone="border-surface-soft bg-surface-soft/50 opacity-80"
                           />
                         ))
                       : null}
@@ -1121,8 +988,8 @@ export function AgentInbox({
                 ) : null}
 
                 {!error && groups.scoped.length === 0 ? (
-                  <div className="rounded-2xl bg-mu-sunken p-6 text-center text-sm leading-relaxed text-mu-fg-2">
-                    <p className="font-extrabold text-mu-fg">
+                  <div className="rounded-2xl bg-surface-soft p-6 text-center text-sm leading-relaxed text-ink-body">
+                    <p className="font-extrabold text-ink-heading">
                       아직 받은 알림이 없어요
                     </p>
                     <p className="mt-2">
@@ -1132,14 +999,14 @@ export function AgentInbox({
                     </p>
                     <Link
                       href={connectHref}
-                      className="bg-mu-accent mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl px-5 text-sm font-bold text-mu-on-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+                      className="ai-gradient-bg mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl px-5 text-sm font-bold text-surface-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
                       {connected ? "연결 상태 확인" : "자동 기록 연결하기"}
                     </Link>
                     {!connected ? (
                       <Link
                         href="/onboarding/shortcut-guide"
-                        className="mt-3 block text-sm font-semibold text-mu-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+                        className="mt-3 block text-sm font-semibold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                       >
                         연동 가이드 보기
                       </Link>
@@ -1150,85 +1017,7 @@ export function AgentInbox({
             )}
           </>
         )}
-      </>
-  );
-
-  const sheets = (
-    <>
-      <Sheet
-        open={Boolean(editEvent)}
-        onClose={() => setEditEvent(null)}
-        title="알림 수정"
-      >
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-bold text-mu-fg">알림 내용</span>
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={4}
-              maxLength={2000}
-              className="min-h-[88px] w-full rounded-xl border border-mu-line px-3 py-2 text-sm"
-            />
-          </label>
-          {editEvent && canEditDraft(editEvent.status) ? (
-            <>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="font-bold text-mu-fg">상호</span>
-                <input
-                  value={editMerchant}
-                  onChange={(e) => setEditMerchant(e.target.value)}
-                  className="min-h-11 rounded-xl border border-mu-line px-3 text-sm"
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-1 text-xs">
-                  <span className="font-bold text-mu-fg">금액</span>
-                  <input
-                    value={editAmount}
-                    inputMode="decimal"
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    className="min-h-11 rounded-xl border border-mu-line px-3 text-sm"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs">
-                  <span className="font-bold text-mu-fg">통화</span>
-                  <input
-                    value={editCurrency}
-                    maxLength={3}
-                    onChange={(e) =>
-                      setEditCurrency(e.target.value.toUpperCase())
-                    }
-                    className="min-h-11 rounded-xl border border-mu-line px-3 text-sm"
-                  />
-                </label>
-              </div>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="font-bold text-mu-fg">날짜 (선택)</span>
-                <input
-                  type="date"
-                  value={editSpentOn}
-                  onChange={(e) => setEditSpentOn(e.target.value)}
-                  className="min-h-11 rounded-xl border border-mu-line px-3 text-sm"
-                />
-              </label>
-            </>
-          ) : null}
-          <p className="text-[11px] text-mu-fg-3">
-            {editEvent && canEditDraft(editEvent.status)
-              ? "확인용 초안이에요. 저장 후 「가계부에 추가」로 반영해요. 이미 들어간 지출은 안 바뀌어요."
-              : "표시 문구만 바꿔요. 이미 가계부에 들어간 지출은 안 바뀌어요."}
-          </p>
-          <button
-            type="button"
-            disabled={busyId === editEvent?.id}
-            className="min-h-11 rounded-xl bg-mu-accent px-4 text-sm font-bold text-mu-on-accent disabled:opacity-50"
-            onClick={() => void saveEdit()}
-          >
-            저장
-          </button>
-        </div>
-      </Sheet>
+      </div>
 
       <QuickTripSheet
         open={sheetOpen}
@@ -1236,29 +1025,6 @@ export function AgentInbox({
         onCreated={onTripCreated}
         reason="inbox"
       />
-    </>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        {body}
-        {sheets}
-      </>
-    );
-  }
-
-  return (
-    <MobileShell
-      title="확인함"
-      showBack={Boolean(tripId)}
-      backHref={backHref}
-      showBottomNav
-    >
-      <div className="mx-auto flex w-full max-w-lg flex-col gap-4 px-4 py-4">
-        {body}
-      </div>
-      {sheets}
     </MobileShell>
   );
 }
