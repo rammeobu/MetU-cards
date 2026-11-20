@@ -11,7 +11,7 @@ import {
 } from "react";
 
 import { ConnectError } from "@/components/onboarding/connect/ConnectError";
-import { ConnectHub } from "@/components/onboarding/connect/ConnectHub";
+import { ConnectStepper } from "@/components/onboarding/connect/ConnectStepper";
 import { GateNotice } from "@/components/onboarding/connect/GateNotice";
 import { RecentEventsStrip } from "@/components/onboarding/connect/RecentEventsStrip";
 import { StepAutomation } from "@/components/onboarding/connect/StepAutomation";
@@ -21,7 +21,6 @@ import { StepShortcut } from "@/components/onboarding/connect/StepShortcut";
 import { StepVerify } from "@/components/onboarding/connect/StepVerify";
 import { UnsupportedHandoff } from "@/components/onboarding/connect/UnsupportedHandoff";
 import { useClipboardCopy } from "@/components/onboarding/connect/useClipboardCopy";
-import { Stepper, type StepItem } from "@/components/ds/Stepper";
 import { apiFetchJson } from "@/lib/api/fetch-json";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { resolvePostOnboardingPath } from "@/lib/auth/post-login-path";
@@ -30,46 +29,26 @@ import { toUserFacingError } from "@/lib/errors/user-message";
 import { useAutomationStatus } from "@/lib/hooks/useAutomationStatus";
 import { useOnlineStatus } from "@/lib/hooks/useOnlineStatus";
 import { detectPlatform } from "@/lib/onboarding/automation";
-import { shouldEnterConnectHub } from "@/lib/onboarding/connect-entry";
 import {
   connectReducer,
-  connectStepCards,
   initialConnectState,
-  pickVerifyArrival,
-  showConnectStepper,
+  stepIndex,
   stepLabel,
+  stepTotal,
   toSnapshot,
   type ConnectErrorState,
-  type ConnectStepPhase,
 } from "@/lib/onboarding/connect-machine";
-import {
-  eventsSince,
-  newestRealEvent,
-} from "@/lib/onboarding/last-device-event";
 import {
   clearSnapshot,
   loadSnapshot,
   saveSnapshot,
 } from "@/lib/onboarding/connect-storage";
-import {
-  defaultTokenLabelForPlatform,
-  nextTokenLabel,
-} from "@/lib/onboarding/token-label";
-import { useTrips } from "@/lib/trips/TripProvider";
 
 type TokenRes = {
   token: string;
   id: string;
   createdAt?: string;
   revokedCount?: number;
-};
-
-type TokensListRes = {
-  tokens: Array<{
-    id: string;
-    label: string;
-    revoked: boolean;
-  }>;
 };
 
 type TestRes = { ok?: boolean; duplicate?: boolean };
@@ -91,24 +70,18 @@ export function ConnectFlow() {
   const { isReady, provider } = useAuth();
   const isGuest = provider === "guest";
   const online = useOnlineStatus();
-  const { activeTrips, trips } = useTrips();
   const [state, dispatch] = useReducer(connectReducer, undefined, () =>
     initialConnectState()
   );
-  const [booted, setBooted] = useState(false);
+  const [detected, setDetected] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [serverTestError, setServerTestError] =
     useState<UserFacingError | null>(null);
   const [waitingMs, setWaitingMs] = useState(0);
   const [pollingStopped, setPollingStopped] = useState(false);
   const [pollEpoch, setPollEpoch] = useState(0);
-  const [activeTokenCount, setActiveTokenCount] = useState(0);
-  const [activeLabels, setActiveLabels] = useState<string[]>([]);
   const prevPhase = useRef(state.phase);
   const prevEventCount = useRef(0);
-  const bootStarted = useRef(false);
-  // 서버 시각 - 클라이언트 시각. 연결 확인 기준 시각(verifyStartedAt)을 서버 시계로 맞춰요.
-  const clockOffsetMs = useRef(0);
   const { copy } = useClipboardCopy();
 
   const gate = searchParams.get("gate");
@@ -120,92 +93,34 @@ export function ConnectFlow() {
     state.phase === "automation" ||
     state.phase === "verify";
 
-  const bootStatus = useAutomationStatus({
-    enabled: isReady && !isGuest && !booted,
-    lite: true,
-    cacheTtlMs: 0,
-  });
-
   const status = useAutomationStatus({
-    enabled:
-      (showStrip &&
-        !pollingStopped &&
-        !(state.phase === "verify" && state.realOk)) ||
-      state.phase === "hub",
+    enabled: showStrip && !pollingStopped,
     lite: state.phase !== "verify",
     intervalMs: state.phase === "verify" ? 5000 : 10_000,
     cacheTtlMs: 0,
   });
 
-  const refreshTokenMeta = useCallback(async () => {
-    const res = await apiFetchJson<TokensListRes>(
-      "/api/agent/tokens",
-      { method: "GET" },
-      { source: "api" }
-    );
-    if (!res.ok) {
-      setActiveTokenCount(0);
-      setActiveLabels([]);
+  useEffect(() => {
+    const snap = loadSnapshot();
+    if (snap) {
+      dispatch({ type: "RESTORE", snapshot: snap });
+      setDetected(true);
       return;
     }
-    const active = res.data.tokens.filter((t) => !t.revoked);
-    setActiveTokenCount(active.length);
-    setActiveLabels(active.map((t) => t.label));
+    const platform = detectPlatform(navigator.userAgent);
+    dispatch({ type: "PLATFORM_DETECTED", platform });
+    setDetected(true);
   }, []);
 
   useEffect(() => {
-    if (!isReady || isGuest || bootStarted.current) return;
-    const snap = loadSnapshot();
-    if (snap && snap.phase !== "hub" && snap.phase !== "done" && snap.phase !== "skipped") {
-      bootStarted.current = true;
-      dispatch({ type: "RESTORE", snapshot: snap });
-      setBooted(true);
-      return;
-    }
-    if (bootStatus.loading) return;
-    bootStarted.current = true;
-    const platform = detectPlatform(navigator.userAgent);
-    const data = bootStatus.data;
-    if (
-      data &&
-      shouldEnterConnectHub({
-        hasActiveToken: data.hasActiveToken,
-        status: data.status,
-      })
-    ) {
-      const hubPlatform =
-        data.platform === "ios" || data.platform === "android"
-          ? data.platform
-          : platform === "ios" || platform === "android"
-            ? platform
-            : "ios";
-      dispatch({
-        type: "ENTER_HUB",
-        platform: hubPlatform,
-        ios27: hubPlatform === "ios" ? true : null,
-      });
-      void refreshTokenMeta();
-    } else {
-      dispatch({ type: "PLATFORM_DETECTED", platform });
-    }
-    setBooted(true);
-  }, [
-    isReady,
-    isGuest,
-    bootStatus.loading,
-    bootStatus.data,
-    refreshTokenMeta,
-  ]);
-
-  useEffect(() => {
-    if (!booted) return;
+    if (!detected) return;
     if (state.phase === "done" || state.phase === "skipped") {
       clearSnapshot();
       return;
     }
-    if (state.phase === "device" || state.phase === "hub") return;
+    if (state.phase === "device") return;
     saveSnapshot(toSnapshot(state));
-  }, [state, booted]);
+  }, [state, detected]);
 
   useEffect(() => {
     if (prevPhase.current === state.phase) return;
@@ -220,20 +135,8 @@ export function ConnectFlow() {
     if (h2 instanceof HTMLElement) h2.focus();
   }, [state.phase]);
 
-  const serverNow = status.data?.serverNow ?? bootStatus.data?.serverNow;
   useEffect(() => {
-    if (!serverNow) return;
-    const server = Date.parse(serverNow);
-    if (Number.isFinite(server)) clockOffsetMs.current = server - Date.now();
-  }, [serverNow]);
-
-  const nowIso = useCallback(
-    () => new Date(Date.now() + clockOffsetMs.current).toISOString(),
-    []
-  );
-
-  useEffect(() => {
-    if (state.phase !== "verify" || state.realOk || pollingStopped) return;
+    if (state.phase !== "verify" || state.deviceOk || pollingStopped) return;
     const started = Date.now();
     const t = setInterval(() => {
       const elapsed = Date.now() - started;
@@ -241,18 +144,23 @@ export function ConnectFlow() {
       if (elapsed >= 10 * 60 * 1000) setPollingStopped(true);
     }, 1000);
     return () => clearInterval(t);
-  }, [state.phase, state.realOk, pollingStopped, pollEpoch]);
+  }, [state.phase, state.deviceOk, pollingStopped, pollEpoch]);
 
-  // 연결 확인: 이 단계에 들어온 뒤 도착한 알림만 인정해요(예전 타임스탬프·sim 무시).
   useEffect(() => {
-    if (state.phase !== "verify") return;
+    if (state.phase !== "verify" || state.deviceOk) return;
     const data = status.data;
     if (!data) return;
-    const arrival = pickVerifyArrival(state.verifyStartedAt, data);
-    if (arrival) {
-      dispatch({ type: "EVENT_RECEIVED", kind: arrival.kind, at: arrival.at });
+    if (data.lastNotificationAt || data.lastDeviceTestAt) {
+      dispatch({
+        type: "EVENT_RECEIVED",
+        kind: data.lastDeviceTestAt ? "device-test" : "real",
+        at:
+          data.lastNotificationAt ??
+          data.lastDeviceTestAt ??
+          new Date().toISOString(),
+      });
     }
-  }, [status.data, state.phase, state.verifyStartedAt]);
+  }, [status.data, state.phase, state.deviceOk]);
 
   useEffect(() => {
     const n = status.data?.recentEvents.length ?? 0;
@@ -268,15 +176,9 @@ export function ConnectFlow() {
         });
         return;
       }
-      if (state.platform !== "ios" && state.platform !== "android") {
-        return;
-      }
       dispatch({ type: "ISSUE_START" });
-      const base = defaultTokenLabelForPlatform(state.platform);
-      let label = base;
-      if (state.issueMode === "add" && !replaceExisting) {
-        label = nextTokenLabel(activeLabels, base);
-      }
+      const label =
+        state.platform === "android" ? "Android 매크로" : "iPhone 단축어";
       const res = await apiFetchJson<TokenRes>(
         "/api/agent/tokens",
         {
@@ -297,7 +199,6 @@ export function ConnectFlow() {
         issuedAt: res.data.createdAt,
       });
       dispatch({ type: "COPY_RESULT", ok });
-      void refreshTokenMeta();
       if (replaceExisting) {
         const n = res.data.revokedCount ?? 0;
         setToast(
@@ -305,18 +206,9 @@ export function ConnectFlow() {
             ? `새 연결 코드로 바꿨어요. 이전 코드 ${n}개는 중지됐어요.`
             : "새 연결 코드를 만들었어요."
         );
-      } else if (state.issueMode === "add") {
-        setToast("새 기기용 연결 코드를 만들었어요.");
       }
     },
-    [
-      activeLabels,
-      copy,
-      online,
-      refreshTokenMeta,
-      state.issueMode,
-      state.platform,
-    ]
+    [copy, online, state.platform]
   );
 
   const saveOnboarding = useCallback(
@@ -357,13 +249,13 @@ export function ConnectFlow() {
   }, [online, router, saveOnboarding, state.platform]);
 
   const enterVerify = useCallback(async () => {
-    dispatch({ type: "CONFIRM_AUTOMATION", at: nowIso() });
+    dispatch({ type: "CONFIRM_AUTOMATION" });
     void saveOnboarding({
       status: "partial",
       platform: state.platform,
       selectedApps: state.selectedApps,
     });
-  }, [nowIso, saveOnboarding, state.platform, state.selectedApps]);
+  }, [saveOnboarding, state.platform, state.selectedApps]);
 
   const serverTest = useCallback(async () => {
     if (!online) {
@@ -417,32 +309,32 @@ export function ConnectFlow() {
     [online, router, saveOnboarding, state.platform, state.selectedApps]
   );
 
-  if (!isReady || !booted) {
+  if (!isReady || !detected) {
     return (
       <div className="space-y-3 p-1" aria-busy="true">
-        <p className="text-sm text-mu-fg-2">기기를 확인하는 중…</p>
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
-        <div className="h-4 animate-pulse rounded bg-mu-sunken" />
+        <p className="text-sm text-ink-body">기기를 확인하는 중…</p>
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
+        <div className="h-4 animate-pulse rounded bg-surface-soft" />
       </div>
     );
   }
 
   if (isGuest) {
     return (
-      <div className="rounded-2xl border border-mu-line bg-mu-bg p-5">
-        <p className="text-sm leading-relaxed text-mu-fg">
+      <div className="rounded-2xl border border-line-muted bg-surface-base p-5">
+        <p className="text-sm leading-relaxed text-ink-heading">
           로그인하면 자동 기록을 연결할 수 있어요
         </p>
         <Link
           href="/login?next=/onboarding/automation"
-          className="bg-mu-accent mt-4 inline-flex min-h-[52px] w-full items-center justify-center rounded-2xl text-base font-bold text-mu-on-accent"
+          className="ai-gradient-bg mt-4 inline-flex min-h-[52px] w-full items-center justify-center rounded-2xl text-base font-bold text-surface-white"
         >
           로그인하기
         </Link>
         <Link
           href="/"
-          className="mt-2 inline-flex min-h-11 w-full items-center justify-center text-sm text-mu-fg-2 underline"
+          className="mt-2 inline-flex min-h-11 w-full items-center justify-center text-sm text-ink-body underline"
         >
           홈으로
         </Link>
@@ -451,27 +343,13 @@ export function ConnectFlow() {
   }
 
   const showLater =
-    showConnectStepper(state) && state.issueMode === "wizard";
+    state.phase !== "unsupported" &&
+    state.phase !== "done" &&
+    state.phase !== "skipped";
 
-  const stepperItems: StepItem[] = connectStepCards(state).map((card) => ({
-    key: card.phase,
-    label: card.label,
-    status:
-      card.status === "upcoming"
-        ? "todo"
-        : card.status === "done"
-          ? "done"
-          : "current",
-  }));
-
-  const sinceEvents = eventsSince(
-    status.data?.recentEvents ?? [],
-    state.verifyStartedAt
-  );
-  const realEvent = state.realOk ? newestRealEvent(sinceEvents) : null;
-  const realEventTripLabel =
-    realEvent?.tripId != null
-      ? (trips.find((t) => t.id === realEvent.tripId)?.destination ?? null)
+  const firstEvent =
+    state.deviceOk && status.data?.recentEvents[0]
+      ? status.data.recentEvents[0]
       : null;
 
   const userError: UserFacingError | null = state.error
@@ -485,84 +363,41 @@ export function ConnectFlow() {
       }
     : null;
 
-  const pasteTrip = activeTrips[0] ?? trips[0];
-  const pasteHref = pasteTrip
-    ? `/trips/${pasteTrip.id}/ledger`
-    : "/agent";
-
-  const hubUiState = status.uiState ?? bootStatus.uiState;
-  const lastAt =
-    status.data?.lastNotificationAt ??
-    bootStatus.data?.lastNotificationAt ??
-    null;
-
   return (
     <div className="flex flex-col gap-4">
-      {showConnectStepper(state) ? (
-        <div className="-mx-5">
-          <Stepper
-            steps={stepperItems}
-            currentKey={state.phase}
-            title={stepLabel(state)}
-            navAriaLabel="연결 단계"
-            onSelect={(key) =>
-              dispatch({
-                type: "GO_TO_STEP",
-                phase: key as ConnectStepPhase,
-              })
-            }
-          />
-        </div>
-      ) : null}
       <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {state.phase !== "unsupported" &&
+          state.phase !== "done" &&
+          state.phase !== "skipped" ? (
+            <ConnectStepper
+              index={stepIndex(state)}
+              total={stepTotal(state)}
+              label={stepLabel(state)}
+            />
+          ) : null}
+        </div>
         {showLater ? (
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-mu-fg-2">
-              연결은 나중에 해도 돼요
-            </p>
-            <button
-              type="button"
-              className="min-h-11 px-1 text-sm font-semibold text-mu-fg-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-              disabled={state.busy === "skip"}
-              aria-busy={state.busy === "skip"}
-              onClick={() => void skip()}
-            >
-              나중에 하기
-            </button>
-          </div>
-        ) : (
-          <span className="flex-1" />
-        )}
-        {state.phase !== "hub" &&
-        state.issueMode !== "wizard" &&
-        state.phase !== "done" &&
-        state.phase !== "skipped" ? (
           <button
             type="button"
-            className="min-h-11 shrink-0 px-2 text-sm font-semibold text-mu-fg-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
-            onClick={() => {
-              clearSnapshot();
-              dispatch({ type: "BACK_TO_HUB" });
-              void refreshTokenMeta();
-            }}
+            className="min-h-11 shrink-0 px-2 text-sm font-semibold text-ink-body underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            disabled={state.busy === "skip"}
+            aria-busy={state.busy === "skip"}
+            onClick={() => void skip()}
           >
-            연결 관리로
+            나중에 하기
           </button>
         ) : null}
       </div>
 
-      {state.phase !== "hub" ? (
-        <GateNotice gate={gate} nextPath={nextPath} />
-      ) : null}
+      <GateNotice gate={gate} nextPath={nextPath} />
 
       {userError ? (
         <ConnectError
           error={userError}
           onRetry={() => {
             dispatch({ type: "DISMISS_ERROR" });
-            if (state.phase === "code") {
-              void issueToken(state.issueMode === "reissue");
-            }
+            if (state.phase === "code") void issueToken(false);
           }}
           onReissue={() => dispatch({ type: "REISSUE_REQUEST" })}
           onLogin={() => router.push("/login?next=/onboarding/automation")}
@@ -573,22 +408,6 @@ export function ConnectFlow() {
               }`
             )
           }
-        />
-      ) : null}
-
-      {state.phase === "hub" ? (
-        <ConnectHub
-          uiState={hubUiState}
-          activeTokenCount={activeTokenCount}
-          lastNotificationAt={lastAt}
-          pasteHref={pasteHref}
-          onVerify={() => dispatch({ type: "RESUME_VERIFY", at: nowIso() })}
-          onAddDevice={() => {
-            void refreshTokenMeta().then(() =>
-              dispatch({ type: "START_ADD_DEVICE" })
-            );
-          }}
-          onReissue={() => dispatch({ type: "START_REISSUE" })}
         />
       ) : null}
 
@@ -620,21 +439,12 @@ export function ConnectFlow() {
           issuing={state.busy === "issue"}
           reissueOpen={state.reissueOpen}
           toast={toast}
-          onIssue={() =>
-            void issueToken(state.issueMode === "reissue")
-          }
+          onIssue={() => void issueToken(false)}
           onCopyResult={(ok) => dispatch({ type: "COPY_RESULT", ok })}
           onNext={() => dispatch({ type: "CODE_NEXT" })}
           onReissueRequest={() => dispatch({ type: "REISSUE_REQUEST" })}
           onReissueConfirm={() => void issueToken(true)}
-          onReissueCancel={() => {
-            if (state.issueMode === "reissue" && !state.token.plain) {
-              clearSnapshot();
-              dispatch({ type: "BACK_TO_HUB" });
-              return;
-            }
-            dispatch({ type: "REISSUE_CANCEL" });
-          }}
+          onReissueCancel={() => dispatch({ type: "REISSUE_CANCEL" })}
         />
       ) : null}
 
@@ -668,12 +478,12 @@ export function ConnectFlow() {
           platform={state.platform}
           events={status.data?.recentEvents ?? []}
           eventsLoading={status.loading}
+          unassignedCount={status.data?.unassignedCount ?? 0}
           rateSlow={status.rateSlow}
           serverTestError={serverTestError}
           waitingMs={waitingMs}
           pollingStopped={pollingStopped}
-          realEvent={realEvent}
-          realEventTripLabel={realEventTripLabel}
+          firstEvent={firstEvent}
           finishing={state.busy === "finish"}
           testing={state.busy === "server-test"}
           onServerTest={() => void serverTest()}
@@ -697,7 +507,7 @@ export function ConnectFlow() {
       ) : null}
 
       {state.phase === "done" || state.phase === "skipped" ? (
-        <p role="status" className="text-sm text-mu-fg-2">
+        <p role="status" className="text-sm text-ink-body">
           이동하는 중…
         </p>
       ) : null}

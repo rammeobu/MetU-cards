@@ -10,7 +10,7 @@ function clampDays(days: number): number {
 
 export function buildQuickTrip(input: {
   destination: string;
-  /** 선택 장소의 countryName. 자유 입력이면 "" */
+  /** 목록에서 고른 나라명. 자유 입력이면 빈 문자열 */
   country?: string;
   startIso: string;
   days: number;

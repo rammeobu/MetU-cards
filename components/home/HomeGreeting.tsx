@@ -1,18 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { DEFAULTS } from "@/lib/constants";
 import { useProfile } from "@/lib/profile/ProfileProvider";
 import { useTrips } from "@/lib/trips/TripProvider";
-import { formatFxRate, type FxTarget } from "@/lib/fx/currencies";
-import { useFxTarget } from "@/lib/fx/useFxTarget";
+import {
+  FALLBACK_RATES,
+  formatFxRate,
+  resolveFxTarget,
+  type FxTarget,
+} from "@/lib/fx/currencies";
 import {
   useEasterEggToast,
   useSecretTap,
 } from "@/components/ui/EasterEggToast";
 
-const REF_USD: FxTarget = {
+const DEFAULT_EMPTY_FX: FxTarget = {
   code: "USD",
   symbol: "$",
   unit: 1,
@@ -36,23 +40,16 @@ export function HomeGreeting() {
     },
   });
 
-  const { target: tripFx, loading: fxTargetLoading } = useFxTarget(
-    primaryTrip?.country,
-    primaryTrip?.destination,
-    { enabled: hasTrip }
+  const fxTarget = useMemo(() => {
+    if (!hasTrip || !primaryTrip) return DEFAULT_EMPTY_FX;
+    return resolveFxTarget(primaryTrip.country, primaryTrip.destination);
+  }, [hasTrip, primaryTrip]);
+
+  const [krwPerUnit, setKrwPerUnit] = useState(
+    () => FALLBACK_RATES[fxTarget.code]
   );
-
-  const fxTarget: FxTarget | null = hasTrip
-    ? tripFx
-    : isReady
-      ? REF_USD
-      : null;
-
-  const [krwPerUnit, setKrwPerUnit] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [rateDate, setRateDate] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
-  const [isLastKnown, setIsLastKnown] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadFx = useCallback(
@@ -66,47 +63,34 @@ export function HomeGreeting() {
         const data = (await res.json()) as {
           krw: number;
           source?: string;
-          rateDate?: string;
           updatedAt?: string;
         };
         if (!Number.isFinite(data.krw) || data.krw <= 0) return;
 
         setKrwPerUnit(data.krw);
-        setIsLive(data.source === "live" || data.source === "cached");
-        setIsLastKnown(data.source === "last-known");
-        setRateDate(data.rateDate ?? null);
+        setIsLive(data.source === "live");
         setUpdatedAt(data.updatedAt ? new Date(data.updatedAt) : new Date());
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
-        /* 상수 폴백 없음 — 이전 값 유지 또는 미표시 */
+        /* 폴백 유지 */
       }
     },
     []
   );
 
   const handleRefresh = useCallback(async () => {
-    if (isRefreshing || !fxTarget) return;
+    if (isRefreshing) return;
     setIsRefreshing(true);
     try {
       await loadFx(fxTarget.code);
     } finally {
       setIsRefreshing(false);
     }
-  }, [fxTarget, isRefreshing, loadFx]);
+  }, [fxTarget.code, isRefreshing, loadFx]);
 
   useEffect(() => {
-    if (!fxTarget) {
-      setKrwPerUnit(null);
-      setIsLive(false);
-      setIsLastKnown(false);
-      setRateDate(null);
-      return;
-    }
-
-    setKrwPerUnit(null);
+    setKrwPerUnit(FALLBACK_RATES[fxTarget.code]);
     setIsLive(false);
-    setIsLastKnown(false);
-    setRateDate(null);
 
     const controller = new AbortController();
     void loadFx(fxTarget.code, controller.signal);
@@ -119,75 +103,48 @@ export function HomeGreeting() {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [fxTarget?.code, loadFx, fxTarget]);
+  }, [fxTarget.code, loadFx]);
 
-  const showSkeleton = hasTrip && (fxTargetLoading || !fxTarget);
-  const rateLabel = showSkeleton
-    ? "····"
-    : fxTarget && krwPerUnit != null
-      ? formatFxRate(fxTarget, krwPerUnit)
-      : fxTarget
-        ? "환율 불러오는 중…"
-        : "····";
+  const rateLabel = formatFxRate(fxTarget, krwPerUnit);
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3">
+      <button
+        type="button"
+        onClick={onGreetingTap}
+        className="min-w-0 truncate text-left text-sm font-medium text-ink-caption"
+      >
+        안녕하세요, {profile.name}님 👋
+      </button>
+      <div
+        className="flex shrink-0 items-center gap-1.5 rounded-2xl border border-line-soft bg-surface-white px-2.5 py-1.5 shadow-sm"
+        title={
+          hasTrip && primaryTrip
+            ? `${primaryTrip.destination} 기준 실시간 ${fxTarget.label} 환율 · 1분마다 갱신${
+                updatedAt ? ` · ${updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}` : ""
+              }`
+            : "기본 참고 환율 (USD) · 1분마다 갱신"
+        }
+      >
+        <p className="whitespace-nowrap text-[11px] font-extrabold leading-none tracking-tight text-ink-heading">
+          <span className="font-medium text-ink-caption">
+            {isLive ? "실시간 " : "환율 "}
+          </span>
+          {rateLabel}
+        </p>
         <button
           type="button"
-          onClick={onGreetingTap}
-          className="mu-focus min-w-0 truncate text-left text-sm font-medium text-mu-fg-3"
+          onClick={() => void handleRefresh()}
+          disabled={isRefreshing}
+          aria-label="환율 새로고침"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-caption transition-colors active:bg-surface-soft disabled:opacity-60"
         >
-          안녕하세요, {profile.name}님
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
+            strokeWidth={2.4}
+          />
         </button>
-        <div
-          className="flex shrink-0 items-center gap-1.5 rounded-mu-xl border border-mu-line bg-mu-card px-2.5 py-1.5"
-          title={
-            hasTrip && primaryTrip && fxTarget
-              ? `${primaryTrip.destination} 기준 실시간 ${fxTarget.label} 환율 · 1분마다 갱신${
-                  updatedAt
-                    ? ` · ${updatedAt.toLocaleTimeString("ko-KR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}`
-                    : ""
-                }`
-              : hasTrip
-                ? "여행지 통화를 확인하는 중이에요"
-                : "기본 참고 환율 (USD) · 1분마다 갱신"
-          }
-        >
-          <p
-            className={`whitespace-nowrap text-[11px] font-extrabold leading-none tracking-tight text-mu-fg ${
-              showSkeleton ? "animate-pulse text-mu-fg-3" : ""
-            }`}
-          >
-            {!showSkeleton ? (
-              <span className="font-medium text-mu-fg-3">
-                {isLive ? "실시간 " : isLastKnown ? "마지막 " : "환율 "}
-              </span>
-            ) : null}
-            {rateLabel}
-          </p>
-          <button
-            type="button"
-            onClick={() => void handleRefresh()}
-            disabled={isRefreshing || !fxTarget}
-            aria-label="환율 새로고침"
-            className="mu-focus flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-mu-fg-3 transition-colors active:bg-mu-sunken disabled:opacity-60"
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-              strokeWidth={2.4}
-            />
-          </button>
-        </div>
       </div>
-      {isLastKnown && rateDate ? (
-        <p className="text-right text-mu-caption text-mu-fg-3">
-          마지막 업데이트 {rateDate}
-        </p>
-      ) : null}
     </div>
   );
 }

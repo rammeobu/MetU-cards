@@ -14,13 +14,7 @@ import { processEvent } from "@/lib/agent/run";
 import {
   pickTripForReceivedAt,
   touchNotificationAt,
-  type TripPick,
 } from "@/lib/onboarding/agent-context";
-import {
-  tripPickToResult,
-  type TripMatchMissReason,
-  type TripMatchRule,
-} from "@/lib/onboarding/trip-match";
 
 function todayKst(): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -52,10 +46,6 @@ export type NotificationIngestOutcome = {
   tripId: string | null;
   shouldProcess: boolean;
   source: AgentEventSource;
-  /** 날짜 규칙으로 붙인 경우의 규칙 (토큰 지정/테스트면 undefined) */
-  matchRule?: TripMatchRule;
-  /** unassigned 사유 */
-  missReason?: TripMatchMissReason;
 };
 
 export async function ingestNotificationPayload(
@@ -67,20 +57,14 @@ export async function ingestNotificationPayload(
 
   // Touch + trip pick are independent — parallelize when both needed.
   let tripId: string | null = input.tokenTripId;
-  let pick: TripPick | null = null;
   if (!tripId && !isDeviceTest) {
-    // 통화 힌트: 같은 날 시작하는 여행이 여럿일 때 local_currency 일치 쪽을 우선한다.
-    const hintCurrency =
-      buildSmsParsePreview(input.body || input.title, { today: todayKst() })
-        ?.currency ?? null;
     const [, picked] = await Promise.all([
       touchNotificationAt(input.userId, input.app, {
         deviceTest: false,
       }),
-      pickTripForReceivedAt(input.userId, receivedAt, { hintCurrency }),
+      pickTripForReceivedAt(input.userId, receivedAt),
     ]);
-    pick = picked;
-    tripId = picked?.tripId ?? null;
+    tripId = picked;
   } else {
     await touchNotificationAt(input.userId, input.app, {
       deviceTest: isDeviceTest,
@@ -137,17 +121,12 @@ export async function ingestNotificationPayload(
   };
 
   // Unassigned: store rule-parser preview only (no Gemini / no network).
-  // Matched by date rule: store result.match.rule so decide() can refuse auto-save
-  // when the match is not exact. Token-bound trips are explicit (no match info).
   let result: Record<string, unknown> | null = null;
   if (!tripId) {
     const preview = buildSmsParsePreview(input.body || input.title, {
       today: todayKst(),
     });
     if (preview) result = { preview };
-  }
-  if (pick) {
-    result = { ...(result ?? {}), ...tripPickToResult(pick) };
   }
 
   const created = await createEvent({
@@ -167,8 +146,6 @@ export async function ingestNotificationPayload(
     tripId,
     shouldProcess: Boolean(tripId && created.ok && !created.duplicate),
     source,
-    ...(pick ? { matchRule: pick.rule } : {}),
-    ...(pick && !tripId && pick.reason ? { missReason: pick.reason } : {}),
   };
 }
 

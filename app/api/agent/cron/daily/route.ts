@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import { getAgentAdmin } from "@/lib/agent/admin";
 import { runDailySettlementCron } from "@/lib/agent/handlers/settlement";
 import { processEvent } from "@/lib/agent/run";
-import { snapshotFxRates } from "@/lib/fx/server";
 import { requireCronSecret } from "@/lib/security/guard";
 
 export const maxDuration = 60;
@@ -37,20 +36,11 @@ async function runDailyJob(): Promise<NextResponse> {
       }
     }
 
-    // Best-effort FX snapshot (open.er → fx_rates). Failure must not break cron.
-    let fxSnapshot: { ok: boolean; count?: number } = { ok: false };
-    try {
-      fxSnapshot = await snapshotFxRates();
-    } catch (err) {
-      console.error("[cron/daily] fx snapshot", err);
-    }
-
     return NextResponse.json({
       ok: true,
       job: "daily",
       settlement,
       sweepAccepted,
-      fxSnapshot,
       ts: new Date().toISOString(),
     });
   } catch (err) {

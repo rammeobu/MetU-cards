@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { memo } from "react";
 import { CalendarDays, Check, ChevronRight, MapPin } from "lucide-react";
-import { formatKRW } from "@/lib/shared/format";
+import { formatKRW } from "@/lib/mock/home";
 import type { Trip } from "@/lib/trips/types";
 import { computeTripDDay, formatTripDDayLabel } from "@/lib/trips/d-day";
 import { DestinationImage } from "@/components/ui/DestinationImage";
@@ -17,7 +17,7 @@ interface TripListCardProps {
 
 const STATUS_LABEL: Record<Trip["status"], string> = {
   upcoming: "예정",
-  ongoing: "여행 중",
+  ongoing: "진행 중",
   completed: "완료",
 };
 

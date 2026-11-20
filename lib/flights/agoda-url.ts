@@ -1,6 +1,8 @@
 import type { OnboardingForm } from "@/lib/onboarding/types";
 import { normalizeFlexibleYear } from "@/lib/onboarding/types";
-import { AIRPORT_PLACES, findAirportPlaceByQuery } from "@/lib/airports/data";
+import type { TripRecommendation } from "@/lib/ai/types";
+import { AIRPORT_PLACES } from "@/lib/airports/data";
+import { findAirportPlaceByQuery } from "@/lib/airports/search";
 import { addDays, todayIsoDate } from "@/lib/shared/dates";
 
 const AGODA_FLIGHTS_BASE = "https://www.agoda.com/ko-kr/flights/results";
@@ -95,6 +97,12 @@ export function resolveTripFlightDates(
   return { departDate, returnDate };
 }
 
+function inferCabinType(totalBudget: number): AgodaCabinType {
+  if (totalBudget >= 8_000_000) return "Business";
+  if (totalBudget >= 4_000_000) return "PremiumEconomy";
+  return "Economy";
+}
+
 export function buildAgodaFlightSearchUrl(params: {
   departureFrom: string;
   arrivalTo: string;
@@ -116,4 +124,25 @@ export function buildAgodaFlightSearchUrl(params: {
   url.searchParams.set("cabinType", params.cabinType ?? "Economy");
   url.searchParams.set("sort", "8");
   return url.toString();
+}
+
+/** AI 추천 결과를 Agoda 항공권 검색 URL로 변환한다. */
+export function buildAgodaUrlFromPlan(plan: TripRecommendation): string | null {
+  const originCode = resolveIataCode(plan.form.origin || plan.origin);
+  const destCode = resolveIataCode(plan.form.destination || plan.destination);
+  if (!originCode || !destCode) return null;
+
+  const { departDate, returnDate } = resolveTripFlightDates(
+    plan.form,
+    plan.nights
+  );
+
+  return buildAgodaFlightSearchUrl({
+    departureFrom: originCode,
+    arrivalTo: destCode,
+    departDate,
+    returnDate,
+    adults: plan.people,
+    cabinType: inferCabinType(plan.totalBudget),
+  });
 }

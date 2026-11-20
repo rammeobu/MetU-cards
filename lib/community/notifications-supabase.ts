@@ -2,7 +2,7 @@ import type { SupabaseClient, RealtimeChannel } from "@supabase/supabase-js";
 import { TABLES } from "@/lib/constants";
 import { formatRelativeTime } from "@/lib/community/storage";
 
-type AppNotificationType =
+export type AppNotificationType =
   | "party_join_request"
   | "party_join_accepted"
   | "party_join_rejected"

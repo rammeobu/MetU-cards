@@ -2,17 +2,25 @@ import "server-only";
 
 import { TABLES } from "@/lib/constants";
 import {
-  fetchFrankfurterKrwRate,
-  resolveLiveKrwRate,
-} from "@/lib/fx/server";
-import { normalizeCurrencyCode } from "@/lib/fx/currencies";
+  FALLBACK_RATES,
+  type FxCurrency,
+} from "@/lib/fx/currencies";
+import { resolveLiveKrwRate } from "@/lib/fx/server";
 import { getServiceSupabase } from "@/lib/supabase/admin";
-import { todayIsoDate } from "@/lib/shared/dates";
+import { addDays, todayIsoDate } from "@/lib/shared/dates";
 import type { FxQuote, FxSource } from "@/lib/ledger/fx";
 
 const QUOTE = "KRW";
 const PROVIDER = "frankfurter";
 const TODAY_CACHE_TTL_HOURS = 6;
+const NEAREST_PRIOR_MAX_DAYS = 7;
+
+function fxProviderBase(): string {
+  return (
+    process.env.FX_PROVIDER_BASE_URL?.replace(/\/$/, "") ??
+    "https://api.frankfurter.dev"
+  );
+}
 
 function cacheTtlHours(rateDate: string, today: string): number {
   if (rateDate === today) return TODAY_CACHE_TTL_HOURS;
@@ -28,6 +36,33 @@ function isCacheFresh(
 ): boolean {
   const ttlMs = cacheTtlHours(rateDate, today) * 3600 * 1000;
   return Date.now() - new Date(fetchedAt).getTime() < ttlMs;
+}
+
+type FrankfurterResponse = {
+  amount?: number;
+  base?: string;
+  date?: string;
+  rates?: Record<string, number>;
+};
+
+async function fetchFrankfurterRate(
+  base: string,
+  dateOrLatest: string
+): Promise<{ rate: number; rateDate: string } | null> {
+  const segment =
+    dateOrLatest === "latest" ? "latest" : encodeURIComponent(dateOrLatest);
+  const url = `${fxProviderBase()}/v1/${segment}?from=${encodeURIComponent(base)}&to=${QUOTE}`;
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as FrankfurterResponse;
+    const rate = data.rates?.[QUOTE];
+    const rateDate = data.date;
+    if (!(typeof rate === "number") || rate <= 0 || !rateDate) return null;
+    return { rate, rateDate };
+  } catch {
+    return null;
+  }
 }
 
 async function readCachedRate(
@@ -55,8 +90,7 @@ async function readCachedRate(
 async function writeCachedRate(
   base: string,
   rateDate: string,
-  rate: number,
-  provider: string = PROVIDER
+  rate: number
 ): Promise<void> {
   const admin = getServiceSupabase();
   if (!admin) return;
@@ -66,26 +100,27 @@ async function writeCachedRate(
       base,
       quote: QUOTE,
       rate,
-      provider,
+      provider: PROVIDER,
       fetched_at: new Date().toISOString(),
     },
     { onConflict: "rate_date,base,quote" }
   );
 }
 
-/** 해당일 이전 가장 가까운 fx_rates (날짜 제한 없음). */
 async function readNearestPriorCache(
   base: string,
   onOrBefore: string
 ): Promise<{ rate: number; rateDate: string } | null> {
   const admin = getServiceSupabase();
   if (!admin) return null;
+  const minDate = addDays(onOrBefore, -NEAREST_PRIOR_MAX_DAYS);
   const { data, error } = await admin
     .from(TABLES.fxRates)
     .select("rate, rate_date")
     .eq("base", base)
     .eq("quote", QUOTE)
     .lte("rate_date", onOrBefore)
+    .gte("rate_date", minDate)
     .order("rate_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -95,30 +130,55 @@ async function readNearestPriorCache(
   return { rate, rateDate: data.rate_date as string };
 }
 
+function fallbackFromStatic(base: string): FxQuote | null {
+  const code = base as FxCurrency;
+  if (!(code in FALLBACK_RATES)) return null;
+  const today = todayIsoDate();
+  return {
+    rate: FALLBACK_RATES[code],
+    rateDate: today,
+    source: "auto_daily",
+    isFallback: true,
+  };
+}
+
+async function fallbackLiveOrStatic(base: string): Promise<FxQuote | null> {
+  const code = base as FxCurrency;
+  if (code in FALLBACK_RATES) {
+    const { krw, source } = await resolveLiveKrwRate(code);
+    const today = todayIsoDate();
+    return {
+      rate: krw,
+      rateDate: today,
+      source: "auto_daily",
+      isFallback: source === "fallback",
+    };
+  }
+  return fallbackFromStatic(base);
+}
+
 /**
- * Daily FX (card/transfer). Frankfurter(~30통화) → fx_rates 최근값 → open.er 라이브.
- * 전부 실패 시 null. 상수 rate 1 폴백 금지 (KRW 항등만 예외).
+ * Daily FX (card/transfer). Uses Supabase fx_rates cache + Frankfurter provider.
  */
 export async function getDailyFxQuote(p: {
   currency: string;
   date: string;
-}): Promise<FxQuote | null> {
-  const base = normalizeCurrencyCode(p.currency);
-  if (!base) return null;
+}): Promise<FxQuote> {
+  const base = p.currency.trim().toUpperCase();
   const requestedDate = p.date.trim();
   const today = todayIsoDate();
 
   if (base === QUOTE) {
     return {
       rate: 1,
-      rateDate: requestedDate || today,
+      rateDate: requestedDate,
       source: "auto_daily",
       isFallback: false,
     };
   }
 
   const isFuture = requestedDate > today;
-  const lookupDate = isFuture || !requestedDate ? "latest" : requestedDate;
+  const lookupDate = isFuture ? "latest" : requestedDate;
 
   if (lookupDate !== "latest") {
     const cached = await readCachedRate(base, lookupDate);
@@ -132,8 +192,7 @@ export async function getDailyFxQuote(p: {
     }
   }
 
-  // Frankfurter: ~30개 통화만. AED/VND 등은 실패 → 다음 단계.
-  const live = await fetchFrankfurterKrwRate(base, lookupDate);
+  const live = await fetchFrankfurterRate(base, lookupDate);
   if (live) {
     void writeCachedRate(base, live.rateDate, live.rate);
     return {
@@ -144,7 +203,7 @@ export async function getDailyFxQuote(p: {
     };
   }
 
-  if (!isFuture && requestedDate) {
+  if (!isFuture) {
     const nearest = await readNearestPriorCache(base, requestedDate);
     if (nearest) {
       return {
@@ -156,19 +215,15 @@ export async function getDailyFxQuote(p: {
     }
   }
 
-  const resolved = await resolveLiveKrwRate(base);
-  if (resolved && resolved.krw > 0) {
-    return {
-      rate: resolved.krw,
-      rateDate: resolved.rateDate,
-      source: "auto_daily",
-      isFallback:
-        resolved.source === "last-known" ||
-        resolved.rateDate !== (requestedDate || today),
-    };
-  }
+  const fb = await fallbackLiveOrStatic(base);
+  if (fb) return fb;
 
-  return null;
+  return {
+    rate: 1,
+    rateDate: requestedDate,
+    source: "auto_daily",
+    isFallback: true,
+  };
 }
 
 export type CashFxQuote = FxQuote & { source: FxSource };

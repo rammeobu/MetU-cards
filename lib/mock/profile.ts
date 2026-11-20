@@ -1,4 +1,3 @@
-/** mock 아님: 기본값/필터 */
 import type { TravelStyle } from "@/components/onboarding/types";
 
 export interface ProfileUser {
@@ -36,3 +35,5 @@ export const PROFILE_STYLE_OPTIONS: {
   { value: "food", label: "맛집", emoji: "🍜" },
   { value: "shopping", label: "쇼핑", emoji: "🛍️" },
 ];
+
+export const CURRENCY_OPTIONS = ["KRW", "USD", "JPY", "EUR"] as const;

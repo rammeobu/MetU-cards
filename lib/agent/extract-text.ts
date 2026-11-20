@@ -50,7 +50,6 @@ export function extractTextDrafts(
       paymentMethod: "card",
       confidence: parsed.confidence,
       kind: parsed.kind === "cancel" ? "cancel" : parsed.kind === "approval" ? "approval" : "unknown",
-      overseas: parsed.overseas,
       warnings: parsed.warnings,
       rawInput: { text: chunk, parsed },
     });

@@ -85,7 +85,7 @@ async function searchText(opts: {
   }
 }
 
-class GooglePlaceProvider implements PlaceProvider {
+export class GooglePlaceProvider implements PlaceProvider {
   readonly id = "google" as const;
   readonly capabilities = CAPABILITIES;
 

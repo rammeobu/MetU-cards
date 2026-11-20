@@ -1,7 +1,9 @@
-/** mock 아님: SmartTip 타입 정의 */
 export interface SmartTip {
   id: string;
   emoji: string;
   title: string;
   description: string;
 }
+
+/** @deprecated Prefer `@/lib/shared/format` */
+export { formatKRW } from "@/lib/shared/format";

@@ -9,7 +9,7 @@ function toIso(year: number, month: number, day: number): string {
 }
 
 /** 오늘(로컬) 정오 기준 대상일까지 남은 일수 (음수면 지난 날짜) */
-function daysUntilIso(isoDate: string, today = todayIsoDate()): number {
+export function daysUntilIso(isoDate: string, today = todayIsoDate()): number {
   const target = new Date(`${isoDate}T12:00:00`);
   const base = new Date(`${today}T12:00:00`);
   return Math.round((target.getTime() - base.getTime()) / 86_400_000);
@@ -28,15 +28,9 @@ export function resolveTripStartIso(
   const label = dateRange.trim();
   if (!label) return null;
 
-  // 2026-07-20 / 2026.07.20 / 2026/7/20
-  const isoMatch = label.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  const isoMatch = label.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
-    const month = Number(isoMatch[2]);
-    const day = Number(isoMatch[3]);
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return toIso(Number(isoMatch[1]), month, day);
-    }
-    return null;
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   }
 
   const yearMonthMatch = label.match(/(\d{4})년\s*(\d{1,2})월/);

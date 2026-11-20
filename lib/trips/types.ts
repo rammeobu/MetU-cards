@@ -10,7 +10,7 @@ export interface TripExpense {
   date: string;
 }
 
-interface TripBudgetAllocation {
+export interface TripBudgetAllocation {
   id: string;
   label: string;
   amount: number;
@@ -54,17 +54,8 @@ export interface Trip {
   /** AI 추천 일정표 (저장 시 포함) */
   dailySchedule?: TripDaySchedule[];
   tips?: string[];
-  /** 확정된 출발일 (YYYY-MM-DD). 없으면 dateRange 에서 추정한다. */
-  startDate?: string | null;
-  /** 확정된 종료일 (YYYY-MM-DD). */
-  endDate?: string | null;
-  /**
-   * 내가 만든 여행이면 true, 초대로 합류한 여행이면 false.
-   * 값이 없으면(로컬/게스트 여행) 소유자로 본다. 수정·삭제·초대·정산 생성은 소유자만 한다.
-   */
-  isOwner?: boolean;
 }
 
-export type TripUpdate = Partial<Omit<Trip, "id" | "expenses" | "isOwner">> & {
+export type TripUpdate = Partial<Omit<Trip, "id" | "expenses">> & {
   expenses?: TripExpense[];
 };
