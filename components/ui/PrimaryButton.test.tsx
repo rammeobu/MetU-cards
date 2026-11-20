@@ -6,37 +6,36 @@ import { PrimaryButton } from "@/components/ui/PrimaryButton";
 afterEach(() => cleanup());
 
 describe("PrimaryButton", () => {
-  it("disabled 는 mu 비활성 토큰을 써요", () => {
+  it("disabled includes bg-none", () => {
     render(<PrimaryButton disabled>확인</PrimaryButton>);
     const btn = screen.getByRole("button", { name: "확인" });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
-    expect(btn.className).toContain("disabled:bg-mu-sunken");
+    expect(btn.className).toContain("disabled:bg-none");
   });
 
-  it("active 는 플랫 accent (그라디언트 없음)", () => {
+  it("active has gradient", () => {
     render(<PrimaryButton>활성</PrimaryButton>);
-    const cls = screen.getByRole("button", { name: "활성" }).className;
-    expect(cls).toContain("bg-mu-accent");
-    expect(cls).not.toContain("ai-gradient");
-    expect(cls).not.toContain("shadow-glow");
+    expect(screen.getByRole("button", { name: "활성" }).className).toContain(
+      "ai-gradient-bg"
+    );
   });
 
-  it("loading 은 aria-busy 와 disabled", () => {
+  it("loading keeps gradient and aria-busy", () => {
     render(<PrimaryButton loading>로딩</PrimaryButton>);
     const btn = screen.getByRole("button", { name: /로딩/ });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(btn.getAttribute("aria-busy")).toBe("true");
-    expect(btn.className).toContain("bg-mu-accent");
+    expect(btn.className).toContain("ai-gradient-bg");
   });
 
-  it("secondary 도 mu 토큰", () => {
+  it("secondary disabled unchanged class presence", () => {
     render(
       <PrimaryButton variant="secondary" disabled>
         취소
       </PrimaryButton>
     );
     expect(screen.getByRole("button", { name: "취소" }).className).toContain(
-      "bg-mu-card"
+      "disabled:text-ink-caption"
     );
   });
 });

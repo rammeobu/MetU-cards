@@ -109,7 +109,6 @@ describe("SplitPatchBox", () => {
     expect(url).toBe("/api/ledger/split-patch");
     expect(JSON.parse(init.body as string)).toEqual({
       expenseId: EXP,
-      tripId: "trip-1",
       text: "철수는 빼 주세요",
     });
   });

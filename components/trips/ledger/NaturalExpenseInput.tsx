@@ -14,36 +14,6 @@ interface NaturalExpenseInputProps {
   onConfirm: (draft: ExpenseDraft, meta: ExpenseParseItemOut) => Promise<void>;
 }
 
-function manualFallback(
-  text: string,
-  meId: string,
-  defaultCurrency: string
-): { item: ExpenseParseItemOut; draft: ExpenseDraft } {
-  return {
-    item: {
-      label: text.slice(0, 40) || "직접 입력",
-      amount: 1,
-      currency: defaultCurrency,
-      paidByMemberId: meId,
-      participantIds: null,
-      category: "기타",
-      placeId: null,
-      spentOn: null,
-      confidence: 0,
-    },
-    draft: {
-      label: "",
-      category: "기타",
-      amount: "",
-      currency: defaultCurrency,
-      paidBy: meId,
-      placeId: "",
-      spentOn: "",
-      dayIndex: "",
-    },
-  };
-}
-
 export function NaturalExpenseInput({
   members,
   meId,
@@ -86,25 +56,18 @@ export function NaturalExpenseInput({
         items?: ExpenseParseItemOut[];
         needsClarification?: string | null;
         error?: string;
-        message?: string;
       };
       if (!res.ok) {
-        setError(
-          data.message ??
-            "분석에 실패했어요. 아래 양식으로 직접 입력해 주세요."
-        );
-        setPreview(manualFallback(trimmed, meId, defaultCurrency));
+        setError(data.error ?? "분석에 실패했어요.");
         return;
       }
       if (data.needsClarification) {
-        setError(`${data.needsClarification} 직접 입력해 주세요.`);
-        setPreview(manualFallback(trimmed, meId, defaultCurrency));
+        setError(data.needsClarification);
         return;
       }
       const item = data.items?.[0];
       if (!item) {
-        setError("지출을 찾지 못했어요. 아래 양식으로 직접 입력해 주세요.");
-        setPreview(manualFallback(trimmed, meId, defaultCurrency));
+        setError("지출을 찾지 못했어요. 다시 입력해 주세요.");
         return;
       }
       const place = item.placeId
@@ -124,8 +87,7 @@ export function NaturalExpenseInput({
         },
       });
     } catch {
-      setError("네트워크 오류가 났어요. 아래 양식으로 직접 입력해 주세요.");
-      setPreview(manualFallback(trimmed, meId, defaultCurrency));
+      setError("네트워크 오류가 났어요.");
     } finally {
       setParsing(false);
     }
@@ -148,7 +110,7 @@ export function NaturalExpenseInput({
         type="button"
         disabled={parsing || !text.trim()}
         onClick={() => void handleParse()}
-        className="min-h-tap rounded-xl bg-brand py-2.5 text-sm font-bold text-surface-white disabled:opacity-50"
+        className="rounded-xl bg-brand py-2.5 text-sm font-bold text-surface-white disabled:opacity-50"
       >
         {parsing ? "분석 중…" : "AI로 해석하기"}
       </button>

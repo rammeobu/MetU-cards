@@ -8,9 +8,9 @@ export type LedgerCategory =
 
 export type SplitType = "equal" | "fixed" | "ratio" | "custom";
 export type PaymentMethod = "card" | "cash" | "transfer";
-type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
+export type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
 export type FxSource = "auto_daily" | "cash_manual";
-type MemberRole = "owner" | "member";
+export type MemberRole = "owner" | "member";
 
 export interface TripMember {
   id: string;
@@ -21,7 +21,7 @@ export interface TripMember {
   userId?: string | null;
 }
 
-interface LedgerItem {
+export interface LedgerItem {
   name: string;
   nameKo?: string | null;
   qty?: number | null;
@@ -83,12 +83,6 @@ export interface LedgerExpenseRow {
   fxMerge?: Record<string, unknown> | null;
   /** agent_reasons.flags 중 UI에 노출하는 부분집합. */
   flags?: ExpenseFlags | null;
-  /** 일본 면세(택스리펀드) 대상 표시 */
-  taxFree?: boolean;
-  /** 원통화 세별도 금액 (환급액 아님) */
-  taxExclAmount?: number | null;
-  /** 영수증 스토리지 경로 존재 여부만 (경로는 노출하지 않음) */
-  hasReceipt?: boolean;
 }
 
 export interface ExpenseRowDb {
@@ -130,9 +124,6 @@ export interface ExpenseRowDb {
   billed_event_id?: string | null;
   fx_merge?: unknown;
   agent_reasons?: unknown;
-  tax_free?: boolean | null;
-  tax_excl_amount?: number | string | null;
-  receipt_path?: string | null;
 }
 
 export interface ShareRowDb {
@@ -162,7 +153,7 @@ function num(v: number | string | null | undefined, fallback = 0): number {
 }
 
 /** agent_reasons JSON에서 UI용 flags만 추출. 원문 reasons는 노출하지 않는다. */
-function flagsFromAgentReasons(raw: unknown): ExpenseFlags | null {
+export function flagsFromAgentReasons(raw: unknown): ExpenseFlags | null {
   if (!raw || typeof raw !== "object") return null;
   const flags = (raw as { flags?: unknown }).flags;
   if (!flags || typeof flags !== "object") return null;
@@ -262,12 +253,6 @@ export function rowToExpense(
         ? (row.fx_merge as Record<string, unknown>)
         : null,
     flags: flagsFromAgentReasons(row.agent_reasons),
-    taxFree: Boolean(row.tax_free),
-    taxExclAmount:
-      row.tax_excl_amount == null || row.tax_excl_amount === ""
-        ? null
-        : num(row.tax_excl_amount),
-    hasReceipt: Boolean(row.receipt_path),
   };
 }
 

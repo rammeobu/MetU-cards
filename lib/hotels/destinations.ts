@@ -31,3 +31,7 @@ export const HOTEL_DESTINATION_SUGGESTIONS = [
   "로스앤젤레스",
   "두바이",
 ] as const;
+
+export function normalizeHotelDestination(input: string): string {
+  return input.trim().replace(/\s+/g, " ");
+}

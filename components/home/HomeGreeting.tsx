@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { FxAttribution } from "@/components/fx/FxAttribution";
 import { DEFAULTS } from "@/lib/constants";
 import { useProfile } from "@/lib/profile/ProfileProvider";
 import { useTrips } from "@/lib/trips/TripProvider";
@@ -136,12 +137,12 @@ export function HomeGreeting() {
         <button
           type="button"
           onClick={onGreetingTap}
-          className="mu-focus min-w-0 truncate text-left text-sm font-medium text-mu-fg-3"
+          className="min-w-0 truncate text-left text-sm font-medium text-ink-caption"
         >
-          안녕하세요, {profile.name}님
+          안녕하세요, {profile.name}님 👋
         </button>
         <div
-          className="flex shrink-0 items-center gap-1.5 rounded-mu-xl border border-mu-line bg-mu-card px-2.5 py-1.5"
+          className="flex shrink-0 items-center gap-1.5 rounded-2xl border border-line-soft bg-surface-white px-2.5 py-1.5 shadow-sm"
           title={
             hasTrip && primaryTrip && fxTarget
               ? `${primaryTrip.destination} 기준 실시간 ${fxTarget.label} 환율 · 1분마다 갱신${
@@ -158,12 +159,12 @@ export function HomeGreeting() {
           }
         >
           <p
-            className={`whitespace-nowrap text-[11px] font-extrabold leading-none tracking-tight text-mu-fg ${
-              showSkeleton ? "animate-pulse text-mu-fg-3" : ""
+            className={`whitespace-nowrap text-[11px] font-extrabold leading-none tracking-tight text-ink-heading ${
+              showSkeleton ? "animate-pulse text-ink-muted" : ""
             }`}
           >
             {!showSkeleton ? (
-              <span className="font-medium text-mu-fg-3">
+              <span className="font-medium text-ink-caption">
                 {isLive ? "실시간 " : isLastKnown ? "마지막 " : "환율 "}
               </span>
             ) : null}
@@ -174,7 +175,7 @@ export function HomeGreeting() {
             onClick={() => void handleRefresh()}
             disabled={isRefreshing || !fxTarget}
             aria-label="환율 새로고침"
-            className="mu-focus flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-mu-fg-3 transition-colors active:bg-mu-sunken disabled:opacity-60"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-caption transition-colors active:bg-surface-soft disabled:opacity-60"
           >
             <RefreshCw
               className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
@@ -184,10 +185,11 @@ export function HomeGreeting() {
         </div>
       </div>
       {isLastKnown && rateDate ? (
-        <p className="text-right text-mu-caption text-mu-fg-3">
+        <p className="text-right text-[10px] text-ink-muted">
           마지막 업데이트 {rateDate}
         </p>
       ) : null}
+      <FxAttribution className="text-right text-[10px] leading-snug text-ink-muted" />
     </div>
   );
 }

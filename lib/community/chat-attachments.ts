@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const PARTY_CHAT_BUCKET = "party-chat";
+export const PARTY_CHAT_BUCKET = "party-chat";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 const IMAGE_MIME_TYPES = new Set([
