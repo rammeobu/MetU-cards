@@ -1,5 +1,5 @@
 /**
- * Unified AI chat client (Next + Gemini). No FastAPI/Render.
+ * Unified AI chat client (Next + OpenAI via lib/ai/gemini.ts). No FastAPI/Render.
  */
 
 import "server-only";
@@ -56,7 +56,7 @@ async function aiChat(params: {
     if (error instanceof AiChatError) throw error;
     const msg = error instanceof Error ? error.message : "ai-error";
     if (msg === "no_api_key" || msg.includes("no_api_key")) {
-      throw new AiChatError("unavailable", "gemini-key-missing");
+      throw new AiChatError("unavailable", "openai-key-missing");
     }
     throw new AiChatError("http", msg);
   }
@@ -73,6 +73,10 @@ export async function aiChatOrNull(params: {
     return await aiChat(params);
   } catch (error) {
     if (error instanceof AiChatError) {
+      console.error(
+        `[aiChatOrNull] mode=${params.mode} code=${error.code}`,
+        error.message
+      );
       return null;
     }
     console.error("[aiChatOrNull]", error);

@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { useLedger } from "@/lib/ledger/useLedger";
 import { useTrips } from "@/lib/trips/TripProvider";
 import { useRouter } from "next/navigation";
-import { Check, MapPin, Plus, Share2, Trash2, Users } from "lucide-react";
+import { Check, Images, MapPin, Plus, Share2, Trash2, Users } from "lucide-react";
 import { MobileShell } from "@/components/layout/MobileShell";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { TripBotSheet } from "@/components/trips/TripBotSheet";
@@ -30,7 +30,7 @@ interface TripDetailContentProps {
 /** 일정·요약은 인페이지. 가계부·정산은 TripJourney(/ledger) 단일 쉘. */
 type DetailTab = "summary" | "schedule";
 
-type NavTab = DetailTab | "ledger" | "settle";
+type NavTab = DetailTab | "ledger" | "settle" | "photos";
 
 function nextScheduleLineFromTrip(trip: {
   dailySchedule?: Array<{
@@ -243,12 +243,15 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
             [
               ["summary", "요약"],
               ["schedule", "일정"],
+              ["photos", "사진"],
               ["ledger", "가계부"],
               ["settle", "정산"],
             ] as const satisfies ReadonlyArray<readonly [NavTab, string]>
           ).map(([key, label]) => {
             const selected =
-              key === "ledger" || key === "settle" ? false : detailTab === key;
+              key === "ledger" || key === "settle" || key === "photos"
+                ? false
+                : detailTab === key;
             return (
               <button
                 key={key}
@@ -264,6 +267,10 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
                     router.push(`/trips/${tripId}/ledger?step=settle`);
                     return;
                   }
+                  if (key === "photos") {
+                    router.push(`/trips/${tripId}/photos`);
+                    return;
+                  }
                   setDetailTab(key);
                 }}
                 className={`min-h-tap flex-1 rounded-full px-1 py-2 text-xs font-bold transition sm:text-sm ${
@@ -272,7 +279,14 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
                     : "text-ink-body"
                 }`}
               >
-                {label}
+                {key === "photos" ? (
+                  <span className="inline-flex items-center justify-center gap-1">
+                    <Images className="h-3.5 w-3.5" aria-hidden />
+                    {label}
+                  </span>
+                ) : (
+                  label
+                )}
               </button>
             );
           })}

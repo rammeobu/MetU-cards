@@ -1,6 +1,6 @@
 import "server-only";
 
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import { z } from "zod";
 
 import { getUsageSink } from "@/lib/ai/usage";
@@ -43,6 +43,10 @@ type InteractionLike = {
 
 type CreateParams = Record<string, unknown>;
 
+/**
+ * Test seam — mocks use the same shape as the OpenAI adapter
+ * (`interactions.create` → InteractionLike).
+ */
 export type GeminiInteractionsClient = {
   interactions: {
     create: (
@@ -67,30 +71,56 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-function modelName(kind: GeminiModelKind): string {
-  if (kind === "main") {
-    return (
-      process.env.GEMINI_MODEL_MAIN?.trim() || "gemini-3.8-flash"
-    );
+type LlmProvider = "openai" | "xai" | "gemini";
+
+function resolveProvider(): LlmProvider {
+  if (process.env.OPENAI_API_KEY?.trim()) return "openai";
+  // Gemini free tier 소진 시 프론트 분류용으로 Grok 우선.
+  if (process.env.XAI_API_KEY?.trim() || process.env.GROK_API_KEY?.trim()) {
+    return "xai";
   }
-  return (
-    process.env.GEMINI_MODEL_FAST?.trim() || "gemini-3.5-flash-lite"
-  );
+  return "gemini";
 }
 
-function thinkingLevel(kind: GeminiModelKind): string {
+function defaultModel(provider: LlmProvider): string {
+  if (provider === "openai") return "gpt-6-luna";
+  if (provider === "xai") return "grok-4.7"; // VERIFY: xAI vision-capable chat model
+  return "gemini-3.8-flash";
+}
+
+/** OpenAI / Grok / Gemini 기본 모델 (env로 덮어쓰기). */
+function modelName(kind: GeminiModelKind): string {
+  const provider = resolveProvider();
   if (kind === "main") {
-    return process.env.GEMINI_THINKING_MAIN?.trim() || "low";
+    if (process.env.OPENAI_MODEL_MAIN?.trim()) {
+      return process.env.OPENAI_MODEL_MAIN.trim();
+    }
+    if (process.env.XAI_MODEL_MAIN?.trim()) {
+      return process.env.XAI_MODEL_MAIN.trim();
+    }
+    if (process.env.GEMINI_MODEL_MAIN?.trim()) {
+      return process.env.GEMINI_MODEL_MAIN.trim();
+    }
+    return defaultModel(provider);
   }
-  return process.env.GEMINI_THINKING_FAST?.trim() || "minimal";
+  if (process.env.OPENAI_MODEL_FAST?.trim()) {
+    return process.env.OPENAI_MODEL_FAST.trim();
+  }
+  if (process.env.XAI_MODEL_FAST?.trim()) {
+    return process.env.XAI_MODEL_FAST.trim();
+  }
+  if (process.env.GEMINI_MODEL_FAST?.trim()) {
+    return process.env.GEMINI_MODEL_FAST.trim();
+  }
+  return defaultModel(provider);
 }
 
 function timeoutMs(): number {
-  return envInt("GEMINI_TIMEOUT_MS", 25_000);
+  return envInt("OPENAI_TIMEOUT_MS", envInt("GEMINI_TIMEOUT_MS", 25_000));
 }
 
 function maxRetries(): number {
-  return envInt("GEMINI_MAX_RETRIES", 2);
+  return envInt("OPENAI_MAX_RETRIES", envInt("GEMINI_MAX_RETRIES", 2));
 }
 
 function dailyCap(): number {
@@ -98,21 +128,31 @@ function dailyCap(): number {
 }
 
 function getApiKey(): string | null {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  return key || null;
+  const openai = process.env.OPENAI_API_KEY?.trim();
+  if (openai) return openai;
+  const xai =
+    process.env.XAI_API_KEY?.trim() || process.env.GROK_API_KEY?.trim();
+  if (xai) return xai;
+  const gemini = process.env.GEMINI_API_KEY?.trim();
+  return gemini || null;
 }
 
-function getClient(): GeminiInteractionsClient | null {
-  if (clientOverride) return clientOverride;
-  const key = getApiKey();
-  if (!key) return null;
-  const ai = new GoogleGenAI({ apiKey: key });
-  return ai as unknown as GeminiInteractionsClient;
+/** OpenAI 기본 / xAI·Gemini 는 OpenAI 호환 baseURL. */
+function openAiBaseURL(): string | undefined {
+  const explicit = process.env.OPENAI_BASE_URL?.trim();
+  if (explicit) return explicit;
+  if (process.env.OPENAI_API_KEY?.trim()) return undefined;
+  if (process.env.XAI_API_KEY?.trim() || process.env.GROK_API_KEY?.trim()) {
+    return "https://api.x.ai/v1";
+  }
+  if (process.env.GEMINI_API_KEY?.trim()) {
+    return "https://generativelanguage.googleapis.com/v1beta/openai/";
+  }
+  return undefined;
 }
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
   const raw = z.toJSONSchema(schema) as Record<string, unknown>;
-  // Gemini rejects some meta keys; keep a plain JSON Schema object.
   const { $schema: _s, ...rest } = raw;
   return rest;
 }
@@ -121,17 +161,43 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRetryableStatus(err: unknown): boolean {
-  const status =
+function errorStatus(err: unknown): number | null {
+  if (
     typeof err === "object" &&
     err !== null &&
     "status" in err &&
     typeof (err as { status: unknown }).status === "number"
-      ? (err as { status: number }).status
-      : null;
+  ) {
+    return (err as { status: number }).status;
+  }
+  return null;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** 일일 무료 한도 등은 재시도해도 안 풀림. */
+function isDailyQuotaExhausted(err: unknown): boolean {
+  const msg = errorText(err);
+  return /free.?tier|per.?day|quota.?exceeded|RESOURCE_EXHAUSTED|GenerateRequestsPerDay/i.test(
+    msg
+  );
+}
+
+function isRetryableStatus(err: unknown): boolean {
+  if (isDailyQuotaExhausted(err)) return false;
+  const status = errorStatus(err);
   if (status === 429 || (status !== null && status >= 500)) return true;
-  const msg = err instanceof Error ? err.message : String(err);
-  return /\b429\b|rate.?limit|unavailable|timeout|5\d\d/i.test(msg);
+  return /\b429\b|rate.?limit|unavailable|timeout|5\d\d/i.test(errorText(err));
+}
+
+/** API 라우트가 사용자 메시지로 매핑할 수 있게 정규화. */
+export function normalizeLlmError(err: unknown): string {
+  if (isDailyQuotaExhausted(err) || errorStatus(err) === 429) {
+    return "quota_exhausted";
+  }
+  return err instanceof Error ? err.message : "openai_error";
 }
 
 async function withRetries<T>(
@@ -186,15 +252,139 @@ async function recordUsage(args: {
   }
 }
 
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+function buildUserContent(
+  input: unknown
+): string | ContentPart[] {
+  if (typeof input === "string") return input;
+  if (!Array.isArray(input)) return String(input ?? "");
+
+  const parts: ContentPart[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (row.type === "text" && typeof row.text === "string") {
+      parts.push({ type: "text", text: row.text });
+      continue;
+    }
+    if (row.type === "image") {
+      const data = typeof row.data === "string" ? row.data : "";
+      const mime =
+        typeof row.mime_type === "string" ? row.mime_type : "image/jpeg";
+      if (!data) continue;
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${mime};base64,${data}` },
+      });
+    }
+  }
+  if (parts.length === 0) return "";
+  if (parts.length === 1 && parts[0].type === "text") return parts[0].text;
+  return parts;
+}
+
+function buildOpenAiClient(): GeminiInteractionsClient {
+  const key = getApiKey();
+  if (!key) {
+    throw new Error("no_api_key");
+  }
+  const baseURL = openAiBaseURL();
+  const openai = new OpenAI({
+    apiKey: key,
+    ...(baseURL ? { baseURL } : {}),
+  });
+  const provider = resolveProvider();
+
+  return {
+    interactions: {
+      create: async (params, options) => {
+        const model = String(params.model ?? defaultModel(provider));
+        const system =
+          typeof params.system_instruction === "string"
+            ? params.system_instruction
+            : "";
+        const userContent = buildUserContent(params.input);
+        const responseFormat = params.response_format as
+          | {
+              type?: string;
+              mime_type?: string;
+              schema?: Record<string, unknown>;
+            }
+          | undefined;
+
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+        if (system.trim()) {
+          messages.push({ role: "system", content: system });
+        }
+        messages.push({ role: "user", content: userContent });
+
+        let format: OpenAI.Chat.ChatCompletionCreateParams["response_format"];
+        const wantsJson =
+          responseFormat?.mime_type === "application/json" ||
+          responseFormat?.type === "json_object" ||
+          Boolean(responseFormat?.schema);
+
+        if (responseFormat?.schema && wantsJson) {
+          format = {
+            type: "json_schema",
+            json_schema: {
+              name: "metu_schema",
+              strict: false,
+              schema: responseFormat.schema,
+            },
+          };
+        } else if (wantsJson) {
+          format = { type: "json_object" };
+        }
+
+        // gpt-6-luna: reasoning_effort=none 이 structured 경로에 안정적.
+        // Gemini OpenAI 호환 엔드포인트는 reasoning_effort 를 안 받아요.
+        const body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+          model,
+          messages,
+          stream: false,
+          ...(format ? { response_format: format } : {}),
+          ...(provider === "openai" ? { reasoning_effort: "none" as const } : {}),
+        };
+        const completion = (await openai.chat.completions.create(body, {
+          signal: options?.abortSignal,
+          timeout: options?.timeout ?? timeoutMs(),
+        })) as OpenAI.Chat.ChatCompletion;
+
+        const text = completion.choices[0]?.message?.content?.trim() ?? "";
+        return {
+          id: completion.id,
+          output_text: text,
+          usage: {
+            total_input_tokens: completion.usage?.prompt_tokens,
+            total_output_tokens: completion.usage?.completion_tokens,
+          },
+        };
+      },
+    },
+  };
+}
+
+function getClient(): GeminiInteractionsClient | null {
+  if (clientOverride) return clientOverride;
+  if (!getApiKey()) return null;
+  return buildOpenAiClient();
+}
+
 async function createInteraction(
   client: GeminiInteractionsClient,
-  params: CreateParams
+  params: CreateParams,
+  callTimeoutMs?: number
 ): Promise<InteractionLike> {
+  const ms = callTimeoutMs && callTimeoutMs > 0 ? callTimeoutMs : timeoutMs();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs());
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await client.interactions.create(params, {
-      timeout: timeoutMs(),
+      timeout: ms,
       abortSignal: controller.signal,
     });
   } finally {
@@ -211,6 +401,8 @@ export async function geminiText(args: {
   tripId?: string;
   /** Prefer JSON-only replies (no markdown fences). */
   json?: boolean;
+  /** Insight mode 등에서 넘기는 호출별 타임아웃(ms). */
+  timeoutMs?: number;
   /** Optional inline images (receipt vision etc.). */
   images?: Array<{ mimeType: string; base64: string }>;
 }): Promise<GeminiResult<string>> {
@@ -233,7 +425,6 @@ export async function geminiText(args: {
   const cap = await guardDaily(args.userId);
   if (cap) return { ...cap, model };
 
-  const thinking = thinkingLevel(args.model);
   const system = args.json
     ? `${args.system}\n\n[출력] JSON만 출력하세요. 마크다운 코드펜스 금지.`
     : args.system;
@@ -250,20 +441,23 @@ export async function geminiText(args: {
         ]
       : args.input;
 
+  const callTimeout = args.timeoutMs;
+
   try {
     const interaction = await withRetries(() =>
-      createInteraction(client, {
-        model,
-        store: false,
-        system_instruction: system,
-        input,
-        response_format: args.json
-          ? { type: "text", mime_type: "application/json" }
-          : { type: "text" },
-        generation_config: {
-          thinking_level: thinking,
+      createInteraction(
+        client,
+        {
+          model,
+          store: false,
+          system_instruction: system,
+          input,
+          response_format: args.json
+            ? { type: "text", mime_type: "application/json" }
+            : { type: "text" },
         },
-      })
+        callTimeout
+      )
     );
 
     const text = interaction.output_text?.trim() ?? "";
@@ -316,7 +510,7 @@ export async function geminiText(args: {
     });
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "gemini_error",
+      error: normalizeLlmError(err),
       model,
       ms,
     };
@@ -343,7 +537,6 @@ export async function geminiStructured<T>(args: {
   if (cap) return { ...cap, model };
 
   const jsonSchema = zodToJsonSchema(args.schema);
-  const thinking = thinkingLevel(args.model);
 
   const runOnce = async (extraHint?: string): Promise<GeminiResult<T>> => {
     const inputText = extraHint
@@ -360,9 +553,6 @@ export async function geminiStructured<T>(args: {
           type: "text",
           mime_type: "application/json",
           schema: jsonSchema,
-        },
-        generation_config: {
-          thinking_level: thinking,
         },
       })
     );
@@ -453,7 +643,7 @@ export async function geminiStructured<T>(args: {
     });
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "gemini_error",
+      error: normalizeLlmError(err),
       model,
       ms,
     };
@@ -489,7 +679,6 @@ export async function geminiVision<T>(args: {
   if (cap) return { ...cap, model };
 
   const jsonSchema = zodToJsonSchema(args.schema);
-  const thinking = thinkingLevel(kind);
   const input: Array<Record<string, unknown>> = [];
   if (args.text?.trim()) {
     input.push({ type: "text", text: args.text.trim() });
@@ -513,9 +702,6 @@ export async function geminiVision<T>(args: {
           type: "text",
           mime_type: "application/json",
           schema: jsonSchema,
-        },
-        generation_config: {
-          thinking_level: thinking,
         },
       })
     );
@@ -594,7 +780,7 @@ export async function geminiVision<T>(args: {
     });
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "gemini_error",
+      error: normalizeLlmError(err),
       model,
       ms,
     };

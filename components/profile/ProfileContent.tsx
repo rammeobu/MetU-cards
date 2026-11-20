@@ -8,6 +8,7 @@ import {
   Camera,
   ChevronRight,
   FileText,
+  Footprints,
   Globe,
   MapPin,
   MessageSquareText,
@@ -473,6 +474,25 @@ export function ProfileContent() {
             <ul className="flex flex-col">
               <li>
                 <HomeNotificationBell variant="row" />
+              </li>
+              <li>
+                <Link
+                  href="/steps"
+                  className="flex min-h-[44px] items-center justify-between border-t border-membership py-4 transition-colors active:bg-mu-sunken"
+                >
+                  <span className="flex items-center gap-3">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-membership">
+                      <Footprints
+                        className="h-4 w-4 text-mu-fg-2"
+                        strokeWidth={2.2}
+                      />
+                    </span>
+                    <span className="text-sm font-semibold tracking-wide text-mu-fg">
+                      만보기 포인트
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-line-muted" />
+                </Link>
               </li>
               <li>
                 <Link

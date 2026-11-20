@@ -367,7 +367,7 @@ export function RecommendResult({
             <p>
               {enrichNotice === "error"
                 ? "AI 보강에 잠시 실패했어요. 지금은 기본 일정을 보여주고 있어요."
-                : "AI 일정 생성은 생략되고, 지식 기반 기본 일정으로 보여드려요."}
+                : "AI 일정을 만들지 못해, 지식 기반 기본 일정으로 보여드려요. 잠시 후 다시 시도해 주세요."}
             </p>
           </div>
         ) : null}

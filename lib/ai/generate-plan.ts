@@ -324,6 +324,7 @@ async function enrichPlanWithAi(params: {
   });
 
   if (!chat) {
+    console.error("[enrichPlanWithAi] chat failed → fallback schedule");
     return {
       flight: params.fallbackFlight,
       hotel: params.fallbackHotel,
@@ -335,6 +336,10 @@ async function enrichPlanWithAi(params: {
 
   const parsed = parsePlanItinerary(chat.content);
   if (!parsed) {
+    console.error(
+      "[enrichPlanWithAi] parse failed → fallback schedule",
+      chat.content.slice(0, 240)
+    );
     return {
       flight: params.fallbackFlight,
       hotel: params.fallbackHotel,

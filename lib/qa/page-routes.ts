@@ -93,6 +93,12 @@ export const PAGE_ROUTES: readonly PageRouteSpec[] = [
     note: "여행 상세",
   },
   {
+    path: "/trips/[id]/photos",
+    file: "app/trips/[id]/photos/page.tsx",
+    access: "auth-or-guest",
+    note: "여행 사진 앨범·자동 분류",
+  },
+  {
     path: "/trips/[id]/ledger",
     file: "app/trips/[id]/ledger/page.tsx",
     access: "auth-or-guest",
@@ -163,6 +169,12 @@ export const PAGE_ROUTES: readonly PageRouteSpec[] = [
     file: "app/profile/page.tsx",
     access: "auth-or-guest",
     note: "프로필",
+  },
+  {
+    path: "/steps",
+    file: "app/steps/page.tsx",
+    access: "auth-or-guest",
+    note: "만보기 포인트 프로토타입 (localStorage)",
   },
   {
     path: "/notifications",
