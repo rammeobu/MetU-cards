@@ -1,42 +1,24 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Settings } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CardProfileSettings } from "@/components/ledger/CardProfileSettings";
-import { CashWithdrawSheet } from "@/components/ledger/CashWithdrawSheet";
-import { HostPayoutSettings } from "@/components/ledger/HostPayoutSettings";
-import { HostTransferSettings } from "@/components/ledger/HostTransferSettings";
 import { CashRateSettings } from "@/components/ledger/CashRateSettings";
 import { ExpenseConfirmSheet } from "@/components/ledger/ExpenseConfirmSheet";
 import { ExpenseChipSplit } from "@/components/ledger/ExpenseChipSplit";
 import { GuestExpenseSlot } from "@/components/ledger/GuestExpenseSlot";
 import { LedgerDashboard } from "@/components/ledger/LedgerDashboard";
-import { AdjustStep } from "@/components/ledger/journey/host/AdjustStep";
-import { ConnectStep } from "@/components/ledger/journey/host/ConnectStep";
-import { InviteStep } from "@/components/ledger/journey/host/InviteStep";
-import { RecordStep } from "@/components/ledger/journey/host/RecordStep";
-import { PayStep } from "@/components/ledger/journey/host/PayStep";
-import { SettleStep } from "@/components/ledger/journey/host/SettleStep";
-import {
-  AddExpenseSheet,
-  type AddExpenseTab,
-} from "@/components/ledger/journey/host/AddExpenseSheet";
+import { PasteExpenseBox } from "@/components/ledger/PasteExpenseBox";
+import { ReceiptUploader } from "@/components/ledger/ReceiptUploader";
+import { SplitBatchBox } from "@/components/ledger/SplitBatchBox";
+import { VoiceInputButton } from "@/components/ledger/VoiceInputButton";
+import { TripInvitePanel } from "@/components/trips/ledger/TripInvitePanel";
 import { Sheet } from "@/components/ds/Sheet";
-import { useOptionalToast } from "@/components/ds/Toast";
-import {
-  TripIntentSheet,
-  type TripIntent,
-} from "@/components/trips/TripIntentSheet";
-import { TripBotSheet } from "@/components/trips/TripBotSheet";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { TABLES } from "@/lib/constants";
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
-import { fetchTripInboxCount } from "@/lib/ledger/inbox-count";
-import {
-  fetchOpenBudgetSuggestions,
-  type OpenBudgetSuggestion,
-} from "@/lib/ledger/open-suggestions";
 import type { HostStepKey } from "@/lib/ledger/journey-state";
 import {
   buildLocalInsight,
@@ -51,7 +33,6 @@ import {
 import type { LedgerExpenseRow, TripMember } from "@/lib/ledger/types";
 import { formatKRW } from "@/lib/shared/format";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
-import { useTrips } from "@/lib/trips/TripProvider";
 
 type Props = {
   tripId: string;
@@ -61,23 +42,11 @@ type Props = {
 };
 
 /** 가계부 탭에서 넘어오는 ?add= / ?settings= 값. 알 수 없는 값은 무시한다. */
-type EntryIntent =
-  | "manual"
-  | "receipt"
-  | "voice"
-  | "cash"
-  | "settings-fx";
+type EntryIntent = "manual" | "receipt" | "voice" | "settings-fx";
 
 function readEntryIntent(params: URLSearchParams): EntryIntent | null {
   const add = params.get("add");
-  if (
-    add === "manual" ||
-    add === "receipt" ||
-    add === "voice" ||
-    add === "cash"
-  ) {
-    return add;
-  }
+  if (add === "manual" || add === "receipt" || add === "voice") return add;
   if (params.get("settings") === "fx") return "settings-fx";
   return null;
 }
@@ -101,18 +70,15 @@ export function LedgerShell({
   step = "record",
   onNavigate,
 }: Props) {
-  const router = useRouter();
   const { user, provider, isAnonymous } = useAuth();
-  const { getTrip } = useTrips();
   const searchParams = useSearchParams();
   const intent = readEntryIntent(searchParams);
   /** UI 숨김만. 권한은 서버 라우트·RLS가 최종 방어. */
   const guestReadonly = isAnonymous;
   const handledIntent = useRef<string | null>(null);
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const voiceRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
-  const toast = useOptionalToast();
-  const [addTab, setAddTab] = useState<AddExpenseTab | null>(null);
-  const [addFocusFirst, setAddFocusFirst] = useState(false);
   const [members, setMembers] = useState<TripMember[]>([]);
   const [expenses, setExpenses] = useState<LedgerExpenseRow[]>([]);
   const [profiles, setProfiles] = useState<
@@ -137,39 +103,7 @@ export function LedgerShell({
   > | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [inboxCount, setInboxCount] = useState(0);
-  const [openSuggestions, setOpenSuggestions] = useState<
-    OpenBudgetSuggestion[]
-  >([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [intentOpen, setIntentOpen] = useState(false);
-  const [cashOpen, setCashOpen] = useState(false);
-  const [botOpen, setBotOpen] = useState(false);
-
-  const tripMeta = useMemo(() => {
-    const trip = getTrip(tripId);
-    const planAllocation = (trip?.budgetAllocation ?? []).map((a) => ({
-      id: a.id,
-      label: a.label,
-      amount: a.amount,
-    }));
-    let tripDays = 1;
-    if (trip?.startDate && trip?.endDate) {
-      const a = Date.parse(`${trip.startDate}T00:00:00Z`);
-      const b = Date.parse(`${trip.endDate}T00:00:00Z`);
-      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) {
-        tripDays = Math.floor((b - a) / 86_400_000) + 1;
-      }
-    } else if (trip?.dailySchedule && trip.dailySchedule.length > 0) {
-      tripDays = trip.dailySchedule.length;
-    }
-    return {
-      planAllocation,
-      tripBudgetKrw: trip?.budget ?? 0,
-      tripDays,
-    };
-  }, [getTrip, tripId]);
-
-  const planAllocation = tripMeta.planAllocation;
 
   const reload = useCallback(async () => {
     const supabase = getBrowserSupabase();
@@ -192,23 +126,27 @@ export function LedgerShell({
       m = await listMembers(supabase, tripId);
     }
     const owner = m.find((row) => row.isOwner && row.userId === user.id);
-    const [e, p, pendingCount, suggestions] = await Promise.all([
+    const [e, p, pendingRes, proposalRes] = await Promise.all([
       listExpenses(supabase, tripId),
       listCardProfiles(supabase),
-      fetchTripInboxCount(supabase, {
-        tripId,
-        userId: user.id,
-        includeProposals: Boolean(owner),
-      }),
+      supabase
+        .from("agent_events")
+        .select("id", { count: "exact", head: true })
+        .eq("trip_id", tripId)
+        .eq("user_id", user.id)
+        .in("status", ["received", "processing", "needs_review", "failed"]),
       owner
-        ? fetchOpenBudgetSuggestions(supabase, tripId)
-        : Promise.resolve([] as OpenBudgetSuggestion[]),
+        ? supabase
+            .from(TABLES.tripExpenseProposals)
+            .select("id", { count: "exact", head: true })
+            .eq("trip_id", tripId)
+            .eq("status", "pending")
+        : Promise.resolve({ count: 0 }),
     ]);
     setMembers(m);
     setExpenses(e);
     setProfiles(p as typeof profiles);
-    setInboxCount(pendingCount);
-    setOpenSuggestions(suggestions);
+    setInboxCount((pendingRes.count ?? 0) + (proposalRes.count ?? 0));
     setLoading(false);
   }, [tripId, user, provider]);
 
@@ -220,40 +158,12 @@ export function LedgerShell({
   const me = members.find((m) => m.userId === user?.id) ?? members[0];
 
   function openDrafts(drafts: ExpenseDraftInput[]) {
-    setAddTab(null);
     setQueue(drafts);
     setQueueIndex(0);
   }
 
-  function openAdd(tab: AddExpenseTab) {
-    setAddFocusFirst(false);
-    setAddTab(tab);
-  }
-
-  function handleTripIntent(selected: TripIntent) {
-    if (selected === "schedule") {
-      router.push(`/trips/${tripId}`);
-      return;
-    }
-    if (selected === "expense") {
-      openAdd("paste");
-      return;
-    }
-    if (selected === "split") {
-      onNavigate?.("adjust");
-      return;
-    }
-    if (selected === "cash") {
-      setCashOpen(true);
-      return;
-    }
-    if (selected === "bot") {
-      setBotOpen(true);
-    }
-  }
-
-  // 가계부 탭의 바로가기: manual 은 확인 시트를 바로 열고, receipt/voice 는 지출 추가 시트를
-  // 그 탭으로 열어 첫 버튼에 포커스만 준다. 파일 선택창은 사용자 제스처가 필요해서 열지 않는다.
+  // 가계부 탭의 바로가기: manual 은 확인 시트를 열고, 나머지는 해당 섹션으로
+  // 스크롤 + 첫 버튼에 포커스만 준다. 파일 선택창은 사용자 제스처가 필요해서 열지 않는다.
   const canEnter = !loading && members.length > 0 && !guestReadonly;
   useEffect(() => {
     if (!intent || !canEnter || handledIntent.current === intent) return;
@@ -263,23 +173,22 @@ export function LedgerShell({
       setQueueIndex(0);
       return;
     }
-    if (intent === "cash") {
-      setCashOpen(true);
-      return;
-    }
     if (intent === "settings-fx") {
       setSettingsOpen(true);
       return;
     }
-    // receipt/voice: record 단계에서만 (TripJourney가 step=record로 정규화)
+    // receipt/voice: record 단계에서만 스크롤 (TripJourney가 step=record로 정규화)
     if (step !== "record") return;
-    setAddFocusFirst(true);
-    setAddTab(intent === "receipt" ? "receipt" : "voice");
+    const target =
+      intent === "receipt" ? receiptRef.current : voiceRef.current;
+    if (!target) return;
+    target.scrollIntoView?.({ block: "center" });
+    target.querySelector<HTMLElement>("button, input, select")?.focus();
   }, [intent, canEnter, step]);
 
   if (loading) {
     return (
-      <div className="h-48 animate-pulse rounded-2xl bg-mu-sunken" aria-busy />
+      <div className="h-48 animate-pulse rounded-2xl bg-surface-soft" aria-busy />
     );
   }
 
@@ -287,40 +196,14 @@ export function LedgerShell({
   const showInvite = step === "invite";
   const showRecord = step === "record";
   const showAdjust = step === "adjust";
-  const showSettle = step === "settle";
-  const showPay = step === "pay";
-
-  const dashboard = (
-    <LedgerDashboard
-      expenses={expenses}
-      members={members}
-      budget={budget || Math.max(total, 1)}
-      insight={insight}
-      insightLoading={insightLoading}
-      embedded={!guestReadonly}
-      onRefreshInsight={() => {
-        setInsightLoading(true);
-        try {
-          const stats = computeLedgerStats({
-            expenses,
-            budget: budget || Math.max(total, 1),
-          });
-          setInsight(buildLocalInsight(stats));
-        } finally {
-          setInsightLoading(false);
-        }
-      }}
-    />
-  );
+  const showSettleLink = step === "settle" || step === "pay";
 
   const expenseList = (
-    <section className="overflow-hidden rounded-mu-xl border border-mu-line bg-mu-card">
-      <h2 className="border-b border-mu-line px-4 py-3 text-mu-heading text-mu-fg">
-        지출 목록
-      </h2>
-      <ul className="flex flex-col gap-2 p-4">
+    <section className="rounded-2xl bg-surface-white p-4 shadow-sm">
+      <h2 className="text-sm font-extrabold text-ink-heading">지출 목록</h2>
+      <ul className="mt-2 flex flex-col gap-2">
         {expenses.length === 0 ? (
-          <li className="text-mu-body text-mu-fg-3">아직 지출이 없어요.</li>
+          <li className="text-xs text-ink-muted">아직 지출이 없어요.</li>
         ) : (
           expenses.map((e) => (
             <ExpenseChipSplit
@@ -340,62 +223,94 @@ export function LedgerShell({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-mobile flex-col gap-5 px-4 pb-28 pt-3">
-      {!guestReadonly ? (
-        <div className="flex items-center justify-end gap-1">
-          <Link
-            href={`/trips/${tripId}/ledger/inbox`}
-            className="mu-focus relative inline-flex min-h-tap items-center rounded-mu-md px-3 text-mu-label font-bold text-mu-accent"
-          >
-            인박스
-            {inboxCount > 0 ? (
-              <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-mu-err px-1.5 text-mu-caption font-extrabold text-mu-on-accent">
-                {inboxCount > 9 ? "9+" : inboxCount}
-              </span>
-            ) : null}
-          </Link>
-          <button
-            type="button"
-            aria-label="설정"
-            className="mu-focus flex h-11 w-11 items-center justify-center rounded-mu-md text-mu-fg-2"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="h-5 w-5" strokeWidth={1.75} aria-hidden />
-          </button>
+    <div className="mx-auto flex w-full max-w-lg flex-col gap-4 px-4 pb-28 pt-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-ink-muted">합계 {formatKRW(total)}</p>
         </div>
-      ) : (
-        <p className="text-mu-caption text-mu-fg-3">
-          합계 <span className="mu-num font-bold text-mu-fg">{formatKRW(total)}</span>
-        </p>
-      )}
+        <div className="flex items-center gap-2">
+          {!guestReadonly ? (
+            <Link
+              href={`/trips/${tripId}/ledger/inbox`}
+              className="relative min-h-[44px] text-xs font-bold text-brand"
+            >
+              인박스
+              {inboxCount > 0 ? (
+                <span className="absolute -right-3 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-extrabold text-white">
+                  {inboxCount > 9 ? "9+" : inboxCount}
+                </span>
+              ) : null}
+            </Link>
+          ) : null}
+          {!guestReadonly ? (
+            <button
+              type="button"
+              aria-label="설정"
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-ink-body"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings className="h-5 w-5" strokeWidth={1.75} aria-hidden />
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {error ? (
-        <p
-          role="alert"
-          className="rounded-mu-lg border border-mu-err/20 bg-mu-err-soft px-3 py-3 text-mu-body font-semibold text-mu-err"
-        >
+        <p className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
           {error}
         </p>
       ) : null}
 
       {members.length === 0 ? (
-        <p className="text-sm text-mu-fg-2">동행자를 먼저 추가해 주세요.</p>
+        <p className="text-sm text-ink-body">동행자를 먼저 추가해 주세요.</p>
       ) : (
         <>
           {showConnect && !guestReadonly ? (
-            <ConnectStep
-              tripId={tripId}
-              onLater={() => onNavigate?.("invite")}
-            />
+            <section className="rounded-2xl border border-line-soft bg-surface-white p-4">
+              <h2 className="text-sm font-extrabold text-ink-heading">
+                알림을 연결해요
+              </h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                결제 알림이 오면 지출이 자동으로 쌓여요
+              </p>
+              <Link
+                href={`/trips/${tripId}/ledger/connect`}
+                className="mt-3 inline-flex min-h-tap items-center text-sm font-bold text-brand"
+              >
+                연결 관리
+              </Link>
+              <button
+                type="button"
+                className="mt-2 block text-xs font-semibold text-ink-muted underline"
+                onClick={() => onNavigate?.("invite")}
+              >
+                나중에 직접 입력할게요
+              </button>
+            </section>
           ) : null}
 
           {showInvite && !guestReadonly ? (
-            <InviteStep
-              tripId={tripId}
-              members={members}
-              canInvite={Boolean(me?.isOwner && me.userId === user?.id)}
-              onMembersChanged={setMembers}
-            />
+            <>
+              <TripInvitePanel
+                tripId={tripId}
+                members={members}
+                canInvite={Boolean(me?.isOwner && me.userId === user?.id)}
+              />
+              <ul className="rounded-2xl bg-surface-white p-4 text-sm">
+                <li className="mb-2 text-xs font-bold text-ink-muted">멤버</li>
+                {members.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex items-center justify-between py-2 text-ink-heading"
+                  >
+                    <span>{m.displayName}</span>
+                    <span className="text-xs text-ink-muted">
+                      {m.isOwner ? "호스트" : "멤버"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
 
           {showRecord ? (
@@ -408,85 +323,117 @@ export function LedgerShell({
                   userId={user.id}
                 />
               ) : guestReadonly ? (
-                <p className="text-xs text-mu-fg-3">
+                <p className="text-xs text-ink-muted">
                   호스트가 승인하면 정산에 들어가요.
                 </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="min-h-[44px] rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"
+                      onClick={() => openDrafts([newManualDraft()])}
+                    >
+                      직접 입력
+                    </button>
+                  </div>
+
+                  <PasteExpenseBox
+                    tripId={tripId}
+                    onDrafts={openDrafts}
+                    onCancelNotice={setCancelNotice}
+                  />
+                  <div ref={receiptRef}>
+                    <ReceiptUploader
+                      tripId={tripId}
+                      onDraft={(d) => openDrafts([d])}
+                    />
+                  </div>
+                  <div ref={voiceRef}>
+                    <VoiceInputButton tripId={tripId} onDrafts={openDrafts} />
+                  </div>
+                </>
+              )}
+
+              <LedgerDashboard
+                expenses={expenses}
+                members={members}
+                budget={budget || Math.max(total, 1)}
+                insight={insight}
+                insightLoading={insightLoading}
+                onRefreshInsight={() => {
+                  setInsightLoading(true);
+                  try {
+                    const stats = computeLedgerStats({
+                      expenses,
+                      budget: budget || Math.max(total, 1),
+                    });
+                    setInsight(buildLocalInsight(stats));
+                  } finally {
+                    setInsightLoading(false);
+                  }
+                }}
+              />
+
+              <div className="flex flex-wrap gap-3 text-xs font-bold text-brand">
+                {!guestReadonly ? (
+                  <Link href={`/trips/${tripId}/ledger/inbox`}>
+                    인박스{inboxCount > 0 ? ` (${inboxCount})` : ""}
+                  </Link>
+                ) : null}
+                {!guestReadonly ? (
+                  <Link href={`/trips/${tripId}/ledger/connect`}>자동 수집</Link>
+                ) : null}
+                <Link href={`/trips/${tripId}/ledger/settle`}>정산</Link>
+                <Link href={`/trips/${tripId}/ledger/report`}>리포트</Link>
+              </div>
+
+              {cancelNotice && !guestReadonly ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+                  <p className="font-bold text-amber-900">취소 문자예요</p>
+                  <p className="text-amber-800">
+                    {cancelNotice.merchant ?? "가맹점"} · {cancelNotice.amount}{" "}
+                    {cancelNotice.currency}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-1 min-h-[44px] font-bold text-amber-900 underline"
+                    onClick={() => setCancelNotice(null)}
+                  >
+                    닫기
+                  </button>
+                </div>
               ) : null}
 
-              {guestReadonly ? (
-                <>
-                  {dashboard}
-                  <div className="grid grid-cols-2 gap-2">
-                    <Link
-                      href={`/trips/${tripId}/ledger/settle`}
-                      className="mu-focus flex min-h-tap items-center justify-center rounded-mu-lg border border-mu-line bg-mu-card text-mu-label font-bold text-mu-accent"
-                    >
-                      정산
-                    </Link>
-                    <Link
-                      href={`/trips/${tripId}/ledger/report`}
-                      className="mu-focus flex min-h-tap items-center justify-center rounded-mu-lg border border-mu-line bg-mu-card text-mu-label font-bold text-mu-accent"
-                    >
-                      리포트
-                    </Link>
-                  </div>
-                  {expenseList}
-                </>
-              ) : (
-                <RecordStep
-                  tripId={tripId}
-                  expenses={expenses}
-                  members={members}
-                  inboxCount={inboxCount}
-                  openSuggestions={openSuggestions}
-                  onSuggestionSettled={() => void reload()}
-                  cancelNotice={cancelNotice}
-                  onDismissCancel={() => setCancelNotice(null)}
-                  onOpenAdd={openAdd}
-                  onOpenIntent={() => setIntentOpen(true)}
-                  onAdjust={() => onNavigate?.("adjust")}
-                  onSettle={() => onNavigate?.("settle")}
-                  dashboard={dashboard}
-                  planAllocation={planAllocation}
-                  tripBudgetKrw={tripMeta.tripBudgetKrw}
-                  tripDays={tripMeta.tripDays}
-                />
-              )}
+              {expenseList}
             </>
           ) : null}
 
           {showAdjust ? (
-            <AdjustStep
-              tripId={tripId}
-              expenses={expenses}
-              members={members}
-              meId={me?.id}
-              isOwner={Boolean(me?.isOwner)}
-              isAnonymous={isAnonymous}
-              onChanged={() => void reload()}
-              onSettle={() => onNavigate?.("settle")}
-              onRecord={() => onNavigate?.("record")}
-            />
+            <>
+              <SplitBatchBox
+                tripId={tripId}
+                onChanged={() => void reload()}
+              />
+              {expenseList}
+            </>
           ) : null}
 
-          {showSettle ? (
-            <SettleStep
-              tripId={tripId}
-              mode="journey"
-              onAdjust={() => onNavigate?.("adjust")}
-              onPay={() => onNavigate?.("pay")}
-            />
-          ) : null}
-
-          {showPay ? (
-            <PayStep
-              tripId={tripId}
-              mode="journey"
-              onSettle={() => onNavigate?.("settle")}
-              onRecap={() => {
-                window.location.href = `/trips/${tripId}/ledger/recap`;
-              }}
-            />
+          {showSettleLink ? (
+            <section className="rounded-2xl border border-line-soft bg-surface-white p-4">
+              <h2 className="text-sm font-extrabold text-ink-heading">
+                {step === "pay" ? "송금을 챙겨요" : "이 금액으로 정산해요"}
+              </h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                정산·송금은 기존 정산 화면에서 이어서 해요
+              </p>
+              <Link
+                href={`/trips/${tripId}/ledger/settle`}
+                className="mt-3 inline-flex min-h-tap items-center rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white"
+              >
+                정산 화면 열기
+              </Link>
+            </section>
           ) : null}
         </>
       )}
@@ -499,85 +446,39 @@ export function LedgerShell({
         >
           <div ref={settingsRef} className="flex flex-col gap-4">
             {user ? (
-              <>
-                <HostPayoutSettings userId={user.id} />
-                {me?.isOwner ? (
-                  <HostTransferSettings
-                    tripId={tripId}
-                    meId={me.id}
-                    members={members}
-                    onTransferred={() => {
-                      void reload();
-                    }}
-                  />
-                ) : null}
-                <CardProfileSettings
-                  userId={user.id}
-                  profiles={profiles}
-                  onChange={setProfiles}
-                />
-              </>
+              <CardProfileSettings
+                userId={user.id}
+                profiles={profiles}
+                onChange={setProfiles}
+              />
             ) : null}
             {me ? <CashRateSettings tripId={tripId} memberId={me.id} /> : null}
             <Link
               href={`/trips/${tripId}/ledger/inbox`}
-              className="text-sm font-bold text-mu-accent"
+              className="text-sm font-bold text-brand"
             >
               인박스
             </Link>
             <Link
               href={`/trips/${tripId}/ledger/report`}
-              className="text-sm font-bold text-mu-accent"
+              className="text-sm font-bold text-brand"
             >
               리포트
             </Link>
             <Link
               href={`/trips/${tripId}/ledger/wallet`}
-              className="text-sm font-bold text-mu-accent"
+              className="text-sm font-bold text-brand"
             >
               면세 지갑
             </Link>
             <Link
               href={`/trips/${tripId}/ledger/recap`}
-              className="text-sm font-bold text-mu-accent"
+              className="text-sm font-bold text-brand"
             >
               리캡
             </Link>
           </div>
         </Sheet>
-      ) : null}
-
-      {!guestReadonly ? (
-        <>
-          <TripIntentSheet
-            open={intentOpen}
-            onClose={() => setIntentOpen(false)}
-            onSelect={handleTripIntent}
-          />
-          <CashWithdrawSheet
-            open={cashOpen}
-            onClose={() => setCashOpen(false)}
-            onDraft={(draft) => openDrafts([draft])}
-          />
-          <TripBotSheet
-            tripId={tripId}
-            open={botOpen}
-            onClose={() => setBotOpen(false)}
-          />
-          <AddExpenseSheet
-            tripId={tripId}
-            tab={addTab}
-            onTabChange={setAddTab}
-            onClose={() => setAddTab(null)}
-            focusFirst={addFocusFirst}
-            onDrafts={openDrafts}
-            onCancelNotice={(draft) => {
-              setAddTab(null);
-              setCancelNotice(draft);
-            }}
-            onManual={() => openDrafts([newManualDraft()])}
-          />
-        </>
       ) : null}
 
       {queue.length > 0 && !guestReadonly ? (
@@ -588,10 +489,7 @@ export function LedgerShell({
           index={queueIndex}
           onIndexChange={setQueueIndex}
           onClose={() => setQueue([])}
-          onSaved={() => {
-            void reload();
-            toast?.show({ text: "지출을 저장했어요", tone: "ok" });
-          }}
+          onSaved={() => void reload()}
           cardProfiles={profiles}
         />
       ) : null}

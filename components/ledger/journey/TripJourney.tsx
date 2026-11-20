@@ -15,29 +15,20 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 import { useAutomationStatus } from "@/lib/hooks/useAutomationStatus";
 import {
   deriveJourney,
-  guestPhaseOf,
-  hostPhaseOf,
-  isGuestStepKey,
   isHostStepKey,
-  resolveGuestPhaseNav,
-  resolveHostPhaseNav,
   resolveStepParam,
-  type GuestPhaseKey,
   type GuestStepKey,
-  type HostPhaseKey,
   type HostStepKey,
   type JourneyRole,
   type JourneySettlement,
   type JourneyStepKey,
 } from "@/lib/ledger/journey-state";
-import { fetchTripInboxCount } from "@/lib/ledger/inbox-count";
 import { computeBalances } from "@/lib/ledger/settle";
 import {
   fetchLatestSettlement,
   listExpenses,
   listMembers,
 } from "@/lib/ledger/supabase";
-import type { LedgerExpenseRow, TripMember } from "@/lib/ledger/types";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 
 type Props = { tripId: string };
@@ -48,11 +39,10 @@ const HOST_CTA: Record<
 > = {
   connect: { label: "자동 수집 연결하기", href: "connect" },
   invite: { label: "다음: 지출 기록", next: "record" },
-  record: { label: "다음: 정산하기", next: "settle" },
+  record: { label: "다음: 분담 조정", next: "adjust" },
   adjust: { label: "다음: 정산하기", next: "settle" },
-  // settle·pay 는 각 Step 이 BottomCTA 소유.
-  settle: { label: "정산 계산하기", href: "settle" },
-  pay: { label: "정산 현황 공유하기", next: undefined },
+  settle: { label: "정산 화면 열기", href: "settle" },
+  pay: { label: "정산 화면 열기", href: "settle" },
 };
 
 export function TripJourney({ tripId }: Props) {
@@ -69,8 +59,6 @@ export function TripJourney({ tripId }: Props) {
 
   const [memberCount, setMemberCount] = useState(1);
   const [expenseCount, setExpenseCount] = useState(0);
-  const [memberRows, setMemberRows] = useState<TripMember[]>([]);
-  const [expenseRows, setExpenseRows] = useState<LedgerExpenseRow[]>([]);
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [settlement, setSettlement] = useState<JourneySettlement | null>(null);
   const [settlementStale, setSettlementStale] = useState(false);
@@ -86,22 +74,21 @@ export function TripJourney({ tripId }: Props) {
     }
     let cancelled = false;
     void (async () => {
-      const [members, expenses, latest, pendingCount] = await Promise.all([
+      const [members, expenses, latest, pendingRes] = await Promise.all([
         listMembers(supabase, tripId),
         listExpenses(supabase, tripId),
         fetchLatestSettlement(supabase, tripId),
-        fetchTripInboxCount(supabase, {
-          tripId,
-          userId: user.id,
-          includeProposals: false,
-        }),
+        supabase
+          .from("agent_events")
+          .select("id", { count: "exact", head: true })
+          .eq("trip_id", tripId)
+          .eq("user_id", user.id)
+          .in("status", ["received", "processing", "needs_review", "failed"]),
       ]);
       if (cancelled) return;
       setMemberCount(Math.max(1, members.length));
       setExpenseCount(expenses.length);
-      setMemberRows(members);
-      setExpenseRows(expenses);
-      setPendingReviewCount(pendingCount);
+      setPendingReviewCount(pendingRes.count ?? 0);
       const me = members.find((m) => m.userId === user.id);
       const liveBalances = computeBalances(
         members.map((m) => m.id),
@@ -180,7 +167,7 @@ export function TripJourney({ tripId }: Props) {
 
   useEffect(() => {
     if (!ready) return;
-    if (role === "guest" && rawStep && !isGuestStepKey(rawStep)) {
+    if (role === "guest" && rawStep && isHostStepKey(rawStep)) {
       const q = new URLSearchParams(searchParams.toString());
       q.set("step", String(journey.defaultStep));
       router.replace(`?${q.toString()}`, { scroll: false });
@@ -210,7 +197,12 @@ export function TripJourney({ tripId }: Props) {
   const goStep = useCallback(
     (key: string) => {
       if (role === "host" && !isHostStepKey(key)) return;
-      if (role === "guest" && !isGuestStepKey(key)) return;
+      if (
+        role === "guest" &&
+        !["share", "adjust", "pay", "done"].includes(key)
+      ) {
+        return;
+      }
       const q = new URLSearchParams(searchParams.toString());
       q.set("step", key);
       q.delete("add");
@@ -219,59 +211,15 @@ export function TripJourney({ tripId }: Props) {
     [router, searchParams, role]
   );
 
-  const journeyInput = useMemo(
-    () => ({
-      automation: automationState,
-      memberCount,
-      expenseCount,
-      pendingReviewCount,
-      pendingProposalCount: 0,
-      settlement,
-    }),
-    [
-      automationState,
-      memberCount,
-      expenseCount,
-      pendingReviewCount,
-      settlement,
-    ]
-  );
-
-  const onSelectPhase = useCallback(
-    (phaseKey: string) => {
-      if (role === "host" && isHostStepKey(currentStep)) {
-        const next = resolveHostPhaseNav(
-          phaseKey as HostPhaseKey,
-          journeyInput,
-          currentStep
-        );
-        goStep(next);
-        return;
-      }
-      if (role === "guest" && isGuestStepKey(currentStep)) {
-        goStep(
-          resolveGuestPhaseNav(phaseKey as GuestPhaseKey, currentStep)
-        );
-      }
-    },
-    [role, currentStep, journeyInput, goStep]
-  );
-
-  const hostStep =
-    role === "host" && isHostStepKey(currentStep) ? currentStep : null;
-  const guestStep: GuestStepKey | null =
-    role === "guest" && isGuestStepKey(currentStep) ? currentStep : null;
+  const hostStep = isHostStepKey(currentStep) ? currentStep : null;
+  const guestStep = (
+    ["share", "adjust", "pay", "done"] as GuestStepKey[]
+  ).includes(currentStep as GuestStepKey)
+    ? (currentStep as GuestStepKey)
+    : null;
 
   const cta = (() => {
     if (!hostStep) return null;
-    // 기록·분담·정산·송금 단계는 각 Step 이 BottomCTA 를 직접 그려요.
-    if (
-      hostStep === "record" ||
-      hostStep === "adjust" ||
-      hostStep === "settle" ||
-      hostStep === "pay"
-    )
-      return null;
     if (hostStep === "connect" && automationState === "connected") {
       return { label: "다음: 멤버 초대", next: "invite" as HostStepKey };
     }
@@ -294,16 +242,8 @@ export function TripJourney({ tripId }: Props) {
     if ("next" in cta && cta.next) goStep(cta.next);
   };
 
-  const currentPhase =
-    role === "host" && isHostStepKey(currentStep)
-      ? hostPhaseOf(currentStep)
-      : role === "guest" && isGuestStepKey(currentStep)
-        ? guestPhaseOf(currentStep)
-        : null;
-
-  // phaseSteps 는 defaultStep 기준이라, 실제 currentStep 에 맞춰 current 표시를 보정해요.
-  const stepsForUi = journey.phaseSteps.map((s) => {
-    if (currentPhase && s.key === currentPhase) {
+  const stepsForUi = journey.steps.map((s) => {
+    if (s.key === currentStep) {
       return {
         ...s,
         status: (s.status === "attention" ? "attention" : "current") as
@@ -332,22 +272,14 @@ export function TripJourney({ tripId }: Props) {
         />
       );
     } else if (guestStep === "adjust") {
-      body = user ? (
-        <GuestAdjust
-          tripId={tripId}
-          userId={user.id}
-          members={memberRows}
-          expenses={expenseRows}
-          onChanged={() => setReloadTick((n) => n + 1)}
-          onBack={() => goStep("share")}
-        />
-      ) : null;
+      body = (
+        <GuestAdjust tripId={tripId} onBack={() => goStep("share")} />
+      );
     } else if (guestStep === "pay") {
       body = (
         <GuestPay
           tripId={tripId}
           hasTransfers={Boolean(settlement && settlement.transfersTotal > 0)}
-          onDone={() => goStep("done")}
         />
       );
     } else {
@@ -367,13 +299,12 @@ export function TripJourney({ tripId }: Props) {
         <OfflineBanner />
         <Stepper
           steps={stepsForUi}
-          currentKey={currentPhase ?? stepsForUi[0]?.key ?? "prep"}
-          onSelect={onSelectPhase}
-          onBack={() => router.push(`/trips/${tripId}`)}
+          currentKey={currentStep}
+          onSelect={goStep}
+          onBack={() => router.push("/agent")}
           title={
-            stepsForUi.find((s) => s.key === currentPhase)?.label ?? "가계부"
+            stepsForUi.find((s) => s.key === currentStep)?.label ?? "가계부"
           }
-          navAriaLabel="가계부 · 정산"
         />
         <div className="flex-1 overflow-y-auto">{body}</div>
         {role === "host" && cta ? (

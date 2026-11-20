@@ -17,12 +17,9 @@ const listMembers = vi.fn();
 const listExpenses = vi.fn();
 const listVoidedExpenseIds = vi.fn();
 const getFxRateToKrw = vi.fn();
-const push = vi.fn();
-const rpc = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "trip-1" }),
-  useRouter: () => ({ push, replace: vi.fn() }),
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -39,10 +36,10 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/lib/auth/AuthProvider", () => ({
-  useAuth: () => ({ user: { id: "u-a" }, isAnonymous: false }),
+  useAuth: () => ({ user: { id: "u-a" } }),
 }));
 vi.mock("@/lib/supabase/browser", () => ({
-  getBrowserSupabase: () => ({ rpc: (...a: unknown[]) => rpc(...a) }),
+  getBrowserSupabase: () => ({}),
 }));
 vi.mock("@/lib/ledger/fx", () => ({
   getFxRateToKrw: (...a: unknown[]) => getFxRateToKrw(...a),
@@ -142,8 +139,7 @@ describe("LedgerSettlePage", () => {
     expect(screen.getByText(/자동으로 만든 정산 제안/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "정산 다시 계산하기" })).toBeTruthy();
     expect(screen.queryByText(/정산 후 지출이 바뀌었어요/)).toBeNull();
-    // SettleStep + PayStep 이 각각 최신 정산을 읽어요.
-    expect(fetchLatestSettlement).toHaveBeenCalledTimes(2);
+    expect(fetchLatestSettlement).toHaveBeenCalledTimes(1);
   });
 
   it("highlights own row and shows signed balances", async () => {

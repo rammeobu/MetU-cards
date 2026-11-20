@@ -131,7 +131,7 @@ export async function listVoidedExpenseIds(
 
 export type SettlementStatus = "open" | "stale" | "completed" | "superseded";
 
-interface SettlementTransfer {
+export interface SettlementTransfer {
   id: string;
   from: string;
   to: string;
@@ -746,36 +746,6 @@ export async function setExpensePayer(
   return { ok: false, error: "결제자를 바꾸지 못했어요." };
 }
 
-/** 현재 호스트만. 가입된 멤버(user_id 있음)에게 trips.user_id·멤버 role 을 넘긴다. */
-export async function transferTripHost(
-  supabase: SupabaseClient,
-  tripId: string,
-  newOwnerMemberId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { error } = await supabase.rpc("transfer_trip_host", {
-    p_trip_id: tripId,
-    p_new_owner_member_id: newOwnerMemberId,
-  });
-  if (!error) return { ok: true };
-  const msg = error.message ?? "";
-  if (msg.includes("forbidden")) {
-    return { ok: false, error: "호스트만 넘길 수 있어요." };
-  }
-  if (msg.includes("guest-cannot-host")) {
-    return { ok: false, error: "아직 가입하지 않은 동행에게는 넘길 수 없어요." };
-  }
-  if (msg.includes("already-owner")) {
-    return { ok: false, error: "이미 호스트예요." };
-  }
-  if (msg.includes("bad-member") || msg.includes("bad-args")) {
-    return { ok: false, error: "넘길 동행을 확인해 주세요." };
-  }
-  if (msg.includes("not-found")) {
-    return { ok: false, error: "여행을 찾지 못했어요." };
-  }
-  return { ok: false, error: "호스트를 넘기지 못했어요." };
-}
-
 export async function upsertCardProfile(
   supabase: SupabaseClient,
   profile: {
@@ -804,47 +774,6 @@ export async function upsertCardProfile(
     .single();
   if (error) return null;
   return data;
-}
-
-export type PayoutProfileRow = {
-  user_id: string;
-  bank: string;
-  account_no: string;
-  updated_at: string;
-};
-
-export async function getPayoutProfile(
-  supabase: SupabaseClient,
-  userId: string
-): Promise<PayoutProfileRow | null> {
-  const { data, error } = await supabase
-    .from(TABLES.ledgerPayoutProfiles)
-    .select("user_id, bank, account_no, updated_at")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error || !data) return null;
-  return data as PayoutProfileRow;
-}
-
-export async function upsertPayoutProfile(
-  supabase: SupabaseClient,
-  input: { userId: string; bank: string; accountNo: string }
-): Promise<PayoutProfileRow | null> {
-  const bank = input.bank.trim().slice(0, 40);
-  const accountNo = input.accountNo.trim().slice(0, 64);
-  if (!bank || accountNo.replace(/[^0-9]/g, "").length < 4) return null;
-  const { data, error } = await supabase
-    .from(TABLES.ledgerPayoutProfiles)
-    .upsert({
-      user_id: input.userId,
-      bank,
-      account_no: accountNo,
-      updated_at: new Date().toISOString(),
-    })
-    .select("user_id, bank, account_no, updated_at")
-    .single();
-  if (error || !data) return null;
-  return data as PayoutProfileRow;
 }
 
 export async function upsertCashRate(

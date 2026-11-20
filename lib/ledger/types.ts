@@ -8,9 +8,9 @@ export type LedgerCategory =
 
 export type SplitType = "equal" | "fixed" | "ratio" | "custom";
 export type PaymentMethod = "card" | "cash" | "transfer";
-type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
+export type ExpenseSource = "receipt" | "sms" | "manual" | "voice";
 export type FxSource = "auto_daily" | "cash_manual";
-type MemberRole = "owner" | "member";
+export type MemberRole = "owner" | "member";
 
 export interface TripMember {
   id: string;
@@ -21,7 +21,7 @@ export interface TripMember {
   userId?: string | null;
 }
 
-interface LedgerItem {
+export interface LedgerItem {
   name: string;
   nameKo?: string | null;
   qty?: number | null;
@@ -162,7 +162,7 @@ function num(v: number | string | null | undefined, fallback = 0): number {
 }
 
 /** agent_reasons JSON에서 UI용 flags만 추출. 원문 reasons는 노출하지 않는다. */
-function flagsFromAgentReasons(raw: unknown): ExpenseFlags | null {
+export function flagsFromAgentReasons(raw: unknown): ExpenseFlags | null {
   if (!raw || typeof raw !== "object") return null;
   const flags = (raw as { flags?: unknown }).flags;
   if (!flags || typeof flags !== "object") return null;

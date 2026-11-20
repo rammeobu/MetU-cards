@@ -31,4 +31,3 @@ next-env.d.ts
 /eval/receipts/images/
 /eval/receipts/labels.json
 /eval/receipts/report.md
-.claude/settings.local.json

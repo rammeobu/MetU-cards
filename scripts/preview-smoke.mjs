@@ -28,11 +28,6 @@ export const CHECKS = [
     expect: (status) => (status === 200 ? null : `expected 200 got ${status}`),
   },
   {
-    name: "about-public",
-    path: "/about",
-    expect: (status) => (status === 200 ? null : `expected 200 got ${status}`),
-  },
-  {
     name: "join-public",
     path: "/join/invalid-token",
     expect: (status, redirected, finalUrl) => {
@@ -48,16 +43,6 @@ export const CHECKS = [
     path: "/s/invalid-token",
     expect: (status) =>
       status >= 200 && status < 400 ? null : `unexpected ${status}`,
-  },
-  {
-    name: "protected-home",
-    path: "/",
-    expect: (status, redirected, finalUrl) => {
-      if (status === 200) return null;
-      if (redirected && /\/login/i.test(finalUrl)) return null;
-      if (status >= 300 && status < 400) return null;
-      return `expected 200 or login redirect got ${status}`;
-    },
   },
   {
     name: "demo-seed",

@@ -12,7 +12,7 @@ export function RecapCard({ destination, recap }: Props) {
   return (
     <article
       aria-label="여행 리캡"
-      className="rounded-mu-xl border border-mu-line bg-mu-card p-6"
+      className="rounded-2xl border border-mu-line bg-mu-card p-6 shadow-sm"
     >
       {destination ? (
         <p className="text-mu-label text-mu-fg-3">{destination}</p>
@@ -24,7 +24,7 @@ export function RecapCard({ destination, recap }: Props) {
 
       {recap.perMemberOwed.length > 0 ? (
         <section className="mt-6">
-          <h2 className="text-sm font-extrabold text-mu-fg">1인당 몫</h2>
+          <h2 className="text-sm font-extrabold text-ink-heading">1인당 몫</h2>
           <ul className="mt-2 space-y-1 text-sm">
             {recap.perMemberOwed.map((m) => (
               <li
@@ -40,7 +40,7 @@ export function RecapCard({ destination, recap }: Props) {
       ) : null}
 
       {recap.topDay ? (
-        <p className="mt-4 text-sm text-mu-fg-2">
+        <p className="mt-4 text-sm text-ink-body">
           가장 많이 쓴 날{" "}
           <strong>
             {recap.topDay.date} · {formatKRW(recap.topDay.krw)}
@@ -49,7 +49,7 @@ export function RecapCard({ destination, recap }: Props) {
       ) : null}
 
       {recap.topCategory ? (
-        <p className="mt-2 text-sm text-mu-fg-2">
+        <p className="mt-2 text-sm text-ink-body">
           최다 카테고리{" "}
           <strong>
             {recap.topCategory.category} · {formatKRW(recap.topCategory.krw)}
@@ -58,10 +58,10 @@ export function RecapCard({ destination, recap }: Props) {
       ) : null}
 
       {recap.feeLeak ? (
-        <p className="mt-4 text-sm text-mu-fg-2">
+        <p className="mt-4 text-sm text-ink-body">
           측정된 수수료 누수{" "}
           <strong>{formatKRW(recap.feeLeak.measuredKrw)}</strong>
-          <span className="text-mu-fg-3">
+          <span className="text-ink-muted">
             {" "}
             ({recap.feeLeak.measuredCount}건 · 청구액 기준)
           </span>
@@ -69,13 +69,13 @@ export function RecapCard({ destination, recap }: Props) {
       ) : null}
 
       {recap.dccSuspectedCount != null ? (
-        <p className="mt-2 text-xs text-mu-fg-3">
+        <p className="mt-2 text-xs text-ink-muted">
           DCC 의심 {recap.dccSuspectedCount}건
         </p>
       ) : null}
 
       {recap.recordCounts ? (
-        <p className="mt-4 text-mu-caption text-mu-fg-3">
+        <p className="mt-4 text-[11px] text-ink-muted">
           기록{" "}
           {Object.entries(recap.recordCounts)
             .map(([k, n]) => `${k} ${n}`)
