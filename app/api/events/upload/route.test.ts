@@ -7,10 +7,6 @@ const upload = vi.fn();
 
 vi.mock("@/lib/security/guard", () => ({
   guardApi: (...args: unknown[]) => guardApi(...args),
-  rejectAnonymousWrite: (identity: { kind?: string; isAnonymous?: boolean }) =>
-    identity.kind === "user" && identity.isAnonymous === true
-      ? Response.json({ error: "guest-readonly" }, { status: 403 })
-      : null,
 }));
 vi.mock("@/lib/agent/membership", () => ({
   assertTripMember: (...args: unknown[]) => assertTripMember(...args),
@@ -74,18 +70,6 @@ describe("POST /api/events/upload", () => {
     const { POST } = await import("./route");
     const res = await POST(request({ file: jpegFile() }));
     expect(res.status).toBe(401);
-    expect(upload).not.toHaveBeenCalled();
-  });
-
-  it("익명 로그인은 403 guest-readonly", async () => {
-    guardApi.mockResolvedValue({
-      identity: { kind: "user", userId: "anon-1", isAnonymous: true },
-      clientKey: "anon-1",
-    });
-    const { POST } = await import("./route");
-    const res = await POST(request({ file: jpegFile() }));
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toEqual({ error: "guest-readonly" });
     expect(upload).not.toHaveBeenCalled();
   });
 

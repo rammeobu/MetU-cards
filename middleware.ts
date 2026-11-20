@@ -9,11 +9,7 @@ import { getPublicSupabaseKey } from "@/lib/supabase/env";
 
 async function resolveAuth(request: NextRequest): Promise<{
   response: NextResponse;
-  /** 실제(비익명) Supabase 로그인 세션 */
   hasUser: boolean;
-  /** 익명 Supabase 세션 (게스트 합류 등) */
-  hasAnonymousUser: boolean;
-  /** 서명된 게스트 쿠키 */
   hasGuestSession: boolean;
 }> {
   let response = NextResponse.next({
@@ -31,7 +27,6 @@ async function resolveAuth(request: NextRequest): Promise<{
   const anonKey = getPublicSupabaseKey();
 
   let hasUser = false;
-  let hasAnonymousUser = false;
 
   if (url && anonKey) {
     const supabase = createServerClient(url, anonKey, {
@@ -58,81 +53,60 @@ async function resolveAuth(request: NextRequest): Promise<{
         supabase.auth.getUser(),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
       ]);
-      const user =
-        result && "data" in result ? result.data.user : null;
-      if (user?.id) {
-        if (user.is_anonymous) {
-          hasAnonymousUser = true;
-        } else {
-          hasUser = true;
-        }
+      if (result && "data" in result && result.data.user?.id) {
+        hasUser = true;
       }
     } catch {
       // ignore and continue
     }
   }
 
-  return { response, hasUser, hasAnonymousUser, hasGuestSession };
+  return { response, hasUser, hasGuestSession };
 }
 
 /**
- * 라우트 3단 분기:
- * 1) Public — 인증 없이 통과 (`/`, `/login`, `/s/*`, 공개 API …)
- * 2) Auth (`/login`) — 실제 로그인만 홈으로 보내고, 게스트 쿠키만 있으면 폼 허용
- * 3) Protected — 세션(실유저·익명·게스트 쿠키) 없으면 `/login?next=`
+ * Page auth + API whitelist.
+ * Non-public /api/* requires a signed-in user or signed guest cookie.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // PWA/정적: getUser 생략
-  if (
-    pathname === "/sw.js" ||
-    pathname === "/site.webmanifest" ||
-    pathname === "/offline.html" ||
-    pathname === "/manifest.webmanifest" ||
-    pathname === "/robots.txt" ||
-    pathname.startsWith("/.well-known/")
-  ) {
+  // Public/static paths: skip getUser (PWA assets must not redirect to /login).
+  if (isPublicPath(pathname) && pathname !== "/login") {
+    if (
+      pathname === "/sw.js" ||
+      pathname === "/site.webmanifest" ||
+      pathname === "/offline.html" ||
+      pathname === "/manifest.webmanifest" ||
+      pathname === "/robots.txt" ||
+      pathname.startsWith("/.well-known/")
+    ) {
+      return NextResponse.next({
+        request: { headers: request.headers },
+      });
+    }
+  }
+
+  if (pathname === "/login" || pathname === "/auth/logout") {
     return NextResponse.next({
       request: { headers: request.headers },
     });
   }
 
-  const { response, hasUser, hasAnonymousUser, hasGuestSession } =
+  const { response, hasUser, hasGuestSession } =
     await resolveAuth(request);
-  const hasAnySession = hasUser || hasAnonymousUser || hasGuestSession;
 
-  // 1) 공개 API
   if (pathname.startsWith("/api/")) {
     if (isPublicApiPath(pathname)) {
       return response;
     }
-    if (!hasAnySession) {
+    if (!hasUser && !hasGuestSession) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     return response;
   }
 
-  // 2) /login — 실제 로그인만 리다이렉트 (게스트·익명은 폼 허용)
-  if (pathname === "/login") {
-    if (hasUser) {
-      const next = safeNextPath(request.nextUrl.searchParams.get("next"), "/");
-      return NextResponse.redirect(new URL(next, request.url));
-    }
-    return response;
-  }
-
-  if (pathname === "/auth/logout") {
-    return response;
-  }
-
-  // 1) 공개 페이지
-  if (isPublicPath(pathname)) {
-    return response;
-  }
-
-  // 3) 보호 라우트
-  if (!hasAnySession) {
+  if (!isPublicPath(pathname) && !hasUser && !hasGuestSession) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
@@ -140,6 +114,13 @@ export async function middleware(request: NextRequest) {
       loginUrl.searchParams.set("next", pathname);
     }
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Unreachable for /login early-return above; kept for auth callback edge cases
+  // where pathname could still be /login after resolveAuth without early exit.
+  if (pathname === "/login" && (hasUser || hasGuestSession)) {
+    const next = safeNextPath(request.nextUrl.searchParams.get("next"), "/");
+    return NextResponse.redirect(new URL(next, request.url));
   }
 
   return response;

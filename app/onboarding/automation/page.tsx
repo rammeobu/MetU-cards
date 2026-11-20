@@ -18,7 +18,7 @@ function ConnectFallback() {
 
 export default function AutomationOnboardingPage() {
   return (
-    <MobileShell title="자동 기록 연결" showBack backHref="/">
+    <MobileShell>
       <div className="flex flex-col gap-4 px-5 pb-2 pt-5">
         <Suspense fallback={<ConnectFallback />}>
           <ConnectFlow />

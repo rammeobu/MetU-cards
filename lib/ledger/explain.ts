@@ -20,7 +20,7 @@ export interface ExplainExpense {
   shares: Readonly<Record<string, number>>;
 }
 
-interface ExplainTransfer {
+export interface ExplainTransfer {
   from: string;
   to: string;
   krw: number;
@@ -33,7 +33,7 @@ export interface ExplainInput {
   transfers: readonly ExplainTransfer[];
 }
 
-interface MemberExpenseLine {
+export interface MemberExpenseLine {
   expenseId: string;
   label: string;
   /** 이 지출을 이 멤버가 낸 금액(결제자일 때만 krwAmount) */
@@ -59,7 +59,7 @@ export interface MemberRow {
   summary: string;
 }
 
-interface TransferNote {
+export interface TransferNote {
   from: string;
   to: string;
   krw: number;

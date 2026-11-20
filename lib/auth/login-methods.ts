@@ -1,4 +1,4 @@
-type LoginMethodId = "kakao";
+export type LoginMethodId = "kakao";
 
 export interface LoginMethod {
   id: LoginMethodId;

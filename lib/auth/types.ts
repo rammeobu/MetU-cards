@@ -1,5 +1,5 @@
 /** Supabase User 와 호환되는 최소 인증 사용자 */
-interface AuthUserMetadata {
+export interface AuthUserMetadata {
   name?: string;
   full_name?: string;
   nickname?: string;
@@ -13,7 +13,7 @@ export interface AuthUser {
   email?: string | null;
   user_metadata?: AuthUserMetadata;
   app_metadata?: { provider?: string };
-  /** Supabase 익명 로그인. 없으면 false 취급. */
+  /** Supabase 익명 로그인. 없으면 false. */
   is_anonymous?: boolean;
 }
 

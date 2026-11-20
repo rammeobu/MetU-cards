@@ -1,6 +1,6 @@
 export type GuidePlatform = "ios" | "android";
 
-type GuidePartId = "A" | "B" | "C" | "D";
+export type GuidePartId = "A" | "B" | "C" | "D";
 
 export interface GuideMistake {
   text: string;
@@ -38,7 +38,7 @@ export interface GuideIntro {
   difficultyChip: string;
 }
 
-interface GuidePartMeta {
+export interface GuidePartMeta {
   id: GuidePartId;
   title: string;
 }
@@ -397,7 +397,7 @@ export const IOS_GUIDE: PlatformGuide = {
       platform: "ios",
       symptom: "금액이 이상하게 기록됨",
       cause: "알림 문구 형식이 특이함",
-      fix: "수신함에서 해당 항목 수정·나중에·삭제. 개선을 위해 앱 이름과 문구를 알려주세요",
+      fix: "수신함에서 해당 항목 수정/무시. 개선을 위해 앱 이름과 문구를 알려주세요",
     },
   ],
 };
