@@ -30,7 +30,7 @@ export function PasteExpenseBox({ tripId, onDrafts, onCancelNotice }: Props) {
         setError(
           res.status === 401
             ? "로그인이 필요해요."
-            : "문자 분석에 실패했어요. 아래 「직접 입력할게요」로 이어 주세요."
+            : "문자 분석에 실패했어요."
         );
         return;
       }
@@ -42,22 +42,21 @@ export function PasteExpenseBox({ tripId, onDrafts, onCancelNotice }: Props) {
       const approvals = drafts.filter((d) => d.kind !== "cancel");
       for (const c of cancels) onCancelNotice?.(c);
       if (approvals.length) onDrafts(approvals);
-      else if (!cancels.length)
-        setError("지출로 읽을 내용이 없어요. 직접 입력해 주세요.");
+      else if (!cancels.length) setError("지출로 읽을 내용이 없어요.");
       else setText("");
       if (approvals.length) setText("");
     } catch {
-      setError("네트워크 오류예요. 직접 입력해 주세요.");
+      setError("네트워크 오류예요.");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-mu-sunken p-3">
-      <p className="text-xs font-bold text-mu-fg">카드 문자 / 푸시 붙여넣기</p>
+    <div className="flex flex-col gap-2 rounded-xl bg-surface-soft p-3">
+      <p className="text-xs font-bold text-ink-heading">카드 문자 / 푸시 붙여넣기</p>
       <textarea
-        className="min-h-[96px] w-full resize-y rounded-lg border border-mu-line bg-mu-card px-3 py-2 text-sm"
+        className="min-h-[96px] w-full resize-y rounded-lg border border-line bg-surface-white px-3 py-2 text-sm"
         placeholder="승인 문자를 붙여 넣으세요"
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -67,7 +66,7 @@ export function PasteExpenseBox({ tripId, onDrafts, onCancelNotice }: Props) {
         <button
           type="button"
           disabled={busy}
-          className="inline-flex min-h-tap items-center gap-1 rounded-lg bg-mu-accent px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
           onClick={() => void parse(text)}
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -76,7 +75,7 @@ export function PasteExpenseBox({ tripId, onDrafts, onCancelNotice }: Props) {
         <button
           type="button"
           disabled={busy}
-          className="inline-flex min-h-tap items-center gap-1 rounded-lg bg-mu-card px-3 py-2 text-xs font-bold text-mu-fg-2 ring-1 ring-line"
+          className="inline-flex items-center gap-1 rounded-lg bg-surface-white px-3 py-2 text-xs font-bold text-ink-body ring-1 ring-line"
           onClick={async () => {
             try {
               const clip = await navigator.clipboard.readText();
@@ -92,7 +91,7 @@ export function PasteExpenseBox({ tripId, onDrafts, onCancelNotice }: Props) {
         </button>
       </div>
       {error ? (
-        <p className="text-xs font-semibold text-mu-err">{error}</p>
+        <p className="text-xs font-semibold text-danger">{error}</p>
       ) : null}
     </div>
   );

@@ -1,13 +1,15 @@
 "use client";
 
 import { Check, Copy, Link2, Share2 } from "lucide-react";
+import { useState } from "react";
 import type { TripMember } from "@/lib/ledger/types";
-import {
-  ALL_KEY,
-  MAX_USE_OPTIONS,
-  TTL_OPTIONS,
-  useTripInvite,
-} from "@/components/trips/ledger/useTripInvite";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
+
+/** create_trip_invite 기본값(마이그레이션 20261029140000)과 문구를 맞춘다. */
+const DEFAULT_TTL_HOURS = 72;
+const DEFAULT_MAX_USES = 10;
+
+const ALL_KEY = "__all__";
 
 interface TripInvitePanelProps {
   tripId: string;
@@ -16,54 +18,96 @@ interface TripInvitePanelProps {
   canInvite: boolean;
 }
 
+function inviteUrl(token: string): string {
+  return `${window.location.origin}/join/${token}`;
+}
+
 /**
- * 동행자 초대 링크·QR (소유자 전용).
- * 토큰/QR 값은 화면 상태에만 두고 로그·분석·에러 메시지에 남기지 않아요.
+ * 동행자 초대 링크 만들기 (소유자 전용).
+ * - 일반 초대: 링크로 들어온 사람이 이름을 고르거나 새로 정해요.
+ * - 이름만 있는 멤버(아직 계정이 없는 사람)는 그 사람 몫으로 지정한 1회용 링크를 따로 만들어요.
+ * 링크(토큰)는 이 화면의 상태에만 두고 로그/분석에는 남기지 않아요.
  */
 export function TripInvitePanel({
   tripId,
   members,
   canInvite,
 }: TripInvitePanelProps) {
-  const {
-    links,
-    qrByKey,
-    busyKey,
-    copiedKey,
-    error,
-    ttlHours,
-    setTtlHours,
-    maxUses,
-    setMaxUses,
-    createInvite,
-    copyLink,
-    shareLink,
-  } = useTripInvite(tripId);
+  const [links, setLinks] = useState<Record<string, string>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   if (!canInvite) return null;
 
   const claimable = members.filter((m) => !m.userId && !m.isOwner);
 
+  async function createInvite(key: string, claimMemberId?: string) {
+    if (busyKey) return;
+    setBusyKey(key);
+    setError("");
+    setCopiedKey(null);
+    try {
+      const supabase = getBrowserSupabase();
+      if (!supabase) {
+        setError("초대 링크를 만들지 못했어요. 로그인 상태를 확인해 주세요.");
+        return;
+      }
+      const { data, error: rpcError } = await supabase.rpc(
+        "create_trip_invite",
+        claimMemberId
+          ? {
+              p_trip_id: tripId,
+              p_claim_member_id: claimMemberId,
+              p_max_uses: 1,
+            }
+          : { p_trip_id: tripId }
+      );
+      if (rpcError || typeof data !== "string" || data.length === 0) {
+        console.error("[invite] create_trip_invite", rpcError?.message ?? "empty");
+        setError("초대 링크를 만들지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      setLinks((prev) => ({ ...prev, [key]: inviteUrl(data) }));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function copyLink(key: string) {
+    const url = links[key];
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 2000);
+    } catch {
+      setError("링크를 복사하지 못했어요. 링크를 길게 눌러 복사해 주세요.");
+    }
+  }
+
+  async function shareLink(key: string, who: string) {
+    const url = links[key];
+    if (!url || typeof navigator.share !== "function") return;
+    try {
+      await navigator.share({
+        title: "여행 초대",
+        text: `${who}, 같이 정산해요. 이 링크로 들어와 주세요.`,
+        url,
+      });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      console.error("[invite] share", e instanceof Error ? e.message : e);
+      setError("공유하지 못했어요. 링크를 복사해서 보내 주세요.");
+    }
+  }
+
   function renderLink(key: string, who: string) {
     const url = links[key];
     if (!url) return null;
     const canNativeShare = typeof navigator.share === "function";
-    const qr = qrByKey[key];
     return (
       <div className="mt-2 flex flex-col gap-2">
-        {qr ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={qr}
-            alt={`${who} 초대 QR`}
-            className="mx-auto h-40 w-40 rounded-xl border border-line-muted bg-surface-white p-2"
-          />
-        ) : (
-          <div
-            className="mx-auto h-40 w-40 animate-pulse rounded-xl bg-surface-white"
-            aria-hidden
-          />
-        )}
         <input
           readOnly
           aria-label={`${who} 초대 링크`}
@@ -78,9 +122,9 @@ export function TripInvitePanel({
             className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-brand px-3 text-xs font-bold text-surface-white"
           >
             {copiedKey === key ? (
-              <Check className="h-4 w-4" aria-hidden />
+              <Check className="h-4 w-4" />
             ) : (
-              <Copy className="h-4 w-4" aria-hidden />
+              <Copy className="h-4 w-4" />
             )}
             {copiedKey === key ? "복사했어요" : "링크 복사"}
           </button>
@@ -90,7 +134,7 @@ export function TripInvitePanel({
               onClick={() => void shareLink(key, who)}
               className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-brand px-3 text-xs font-bold text-brand"
             >
-              <Share2 className="h-4 w-4" aria-hidden />
+              <Share2 className="h-4 w-4" />
               공유하기
             </button>
           ) : null}
@@ -107,39 +151,8 @@ export function TripInvitePanel({
       <div>
         <p className="text-sm font-extrabold text-ink-heading">동행자 초대</p>
         <p className="mt-0.5 text-xs text-ink-caption">
-          QR을 보여 주거나 링크를 보내면, 가입 없이 이름만으로 합류할 수 있어요.
+          링크를 받은 동행자가 로그인하면 이 여행과 가계부를 함께 볼 수 있어요.
         </p>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <label className="flex flex-col gap-1 text-xs font-semibold text-ink-caption">
-          유효 시간
-          <select
-            className="min-h-tap rounded-xl border border-line-muted bg-surface-white px-2 text-sm text-ink-body"
-            value={ttlHours}
-            onChange={(e) => setTtlHours(Number(e.target.value))}
-          >
-            {TTL_OPTIONS.map((h) => (
-              <option key={h} value={h}>
-                {h}시간
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-semibold text-ink-caption">
-          최대 인원
-          <select
-            className="min-h-tap rounded-xl border border-line-muted bg-surface-white px-2 text-sm text-ink-body"
-            value={maxUses}
-            onChange={(e) => setMaxUses(Number(e.target.value))}
-          >
-            {MAX_USE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}명
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       <div>
@@ -149,7 +162,7 @@ export function TripInvitePanel({
           onClick={() => void createInvite(ALL_KEY)}
           className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-brand px-4 text-sm font-bold text-surface-white disabled:opacity-60"
         >
-          <Link2 className="h-4 w-4" aria-hidden />
+          <Link2 className="h-4 w-4" />
           {busyKey === ALL_KEY
             ? "만드는 중…"
             : links[ALL_KEY]
@@ -159,8 +172,9 @@ export function TripInvitePanel({
         {links[ALL_KEY] ? (
           <>
             {renderLink(ALL_KEY, "동행자")}
-            <p className="mt-2 text-xs text-ink-muted">
-              이 링크는 {ttlHours}시간 동안, 최대 {maxUses}명까지 쓸 수 있어요.
+            <p className="mt-2 text-[11px] text-ink-muted">
+              이 링크는 {DEFAULT_TTL_HOURS}시간 동안, 최대 {DEFAULT_MAX_USES}명까지
+              쓸 수 있어요.
             </p>
           </>
         ) : null}
@@ -187,8 +201,8 @@ export function TripInvitePanel({
                 {links[m.id] ? (
                   <>
                     {renderLink(m.id, m.displayName)}
-                    <p className="mt-2 text-xs text-ink-muted">
-                      이 링크는 {ttlHours}시간 동안, 1번만 쓸 수 있어요.
+                    <p className="mt-2 text-[11px] text-ink-muted">
+                      이 링크는 {DEFAULT_TTL_HOURS}시간 동안, 1번만 쓸 수 있어요.
                     </p>
                   </>
                 ) : null}
