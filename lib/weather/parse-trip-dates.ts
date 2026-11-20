@@ -90,3 +90,13 @@ export function parseTripDateRange(
 
   return null;
 }
+
+export function enumerateIsoDates(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    dates.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return dates;
+}

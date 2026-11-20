@@ -58,18 +58,18 @@ export function ActiveTripSmartTips() {
   if (!isReady) {
     return (
       <div className="flex flex-col gap-3">
-        <SectionHeader title="AI 팁" ai />
+        <SectionHeader title="AI Tip" ai />
         <div className="flex gap-3 overflow-hidden" aria-busy="true">
-          <div className="h-28 w-60 shrink-0 animate-pulse rounded-mu-xl bg-mu-sunken" />
-          <div className="h-28 w-60 shrink-0 animate-pulse rounded-mu-xl bg-mu-sunken" />
+          <div className="h-28 w-60 shrink-0 animate-pulse rounded-2xl bg-surface-soft" />
+          <div className="h-28 w-60 shrink-0 animate-pulse rounded-2xl bg-surface-soft" />
         </div>
       </div>
     );
   }
 
-  if (!primaryTrip) return null;
-
-  const title = `AI 팁 · ${primaryTrip.destination}`;
+  const title = primaryTrip
+    ? `AI Tip · ${primaryTrip.destination}`
+    : "AI Tip · 여행 준비";
 
   return (
     <div className="relative flex flex-col gap-2">
@@ -82,12 +82,12 @@ export function ActiveTripSmartTips() {
           aria-busy="true"
           aria-label="맞춤 팁 생성 중"
         >
-          <div className="h-28 w-60 shrink-0 animate-pulse rounded-mu-xl bg-mu-sunken/80" />
-          <div className="h-28 w-60 shrink-0 animate-pulse rounded-mu-xl bg-mu-sunken/80" />
+          <div className="h-28 w-60 shrink-0 animate-pulse rounded-2xl bg-surface-soft/80" />
+          <div className="h-28 w-60 shrink-0 animate-pulse rounded-2xl bg-surface-soft/80" />
         </div>
       ) : null}
       {!loading && loadFailed ? (
-        <p className="px-1 text-xs text-mu-fg-3">
+        <p className="px-1 text-xs text-ink-caption">
           기본 팁을 보여드려요. 연결되면 AI 팁으로 바뀌어요.
         </p>
       ) : null}

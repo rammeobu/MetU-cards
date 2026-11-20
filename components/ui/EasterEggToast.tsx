@@ -416,6 +416,8 @@ export function useEasterEggToast() {
   return ctx;
 }
 
+export const useEasterEgg = useEasterEggToast;
+
 export function useSecretTap(params: {
   tapsRequired: number;
   windowMs?: number;
