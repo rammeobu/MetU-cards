@@ -33,16 +33,21 @@ export function useAuthActions() {
     loginWithEmail,
     signUpWithEmail,
     resendSignupConfirmation,
+    resetPasswordWithEmail,
+    updatePassword: updatePasswordWithAuth,
     loginAsGuest,
   } = useAuth();
 
-  const signInWithKakao = useCallback(async (): Promise<AuthOk | AuthFail> => {
-    return wrap(async () => {
-      const result = await loginWithKakao();
-      if (!result.ok) return result;
-      return { ok: true };
-    });
-  }, [loginWithKakao]);
+  const signInWithKakao = useCallback(
+    async (next?: string | null): Promise<AuthOk | AuthFail> => {
+      return wrap(async () => {
+        const result = await loginWithKakao(next);
+        if (!result.ok) return result;
+        return { ok: true };
+      });
+    },
+    [loginWithKakao]
+  );
 
   const signInWithEmail = useCallback(
     async (email: string, password: string): Promise<AuthOk | AuthFail> => {
@@ -94,11 +99,35 @@ export function useAuthActions() {
     });
   }, [loginAsGuest]);
 
+  const resetPassword = useCallback(
+    async (email: string): Promise<AuthOk | AuthFail> => {
+      return wrap(async () => {
+        const result = await resetPasswordWithEmail(email);
+        if (!result.ok) return result;
+        return { ok: true };
+      });
+    },
+    [resetPasswordWithEmail]
+  );
+
+  const updatePassword = useCallback(
+    async (password: string): Promise<AuthOk | AuthFail> => {
+      return wrap(async () => {
+        const result = await updatePasswordWithAuth(password);
+        if (!result.ok) return result;
+        return { ok: true };
+      });
+    },
+    [updatePasswordWithAuth]
+  );
+
   return {
     signInWithKakao,
     signInWithEmail,
     signUpWithEmail: signUpWithEmailAction,
     resendConfirmation,
+    resetPassword,
+    updatePassword,
     continueAsGuest,
   };
 }

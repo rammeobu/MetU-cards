@@ -61,12 +61,12 @@ const ARGS = {
 beforeEach(() => {
   __resetMemoryUsageSinkForTests();
   resetUsageSinkForTests();
-  delete process.env.GEMINI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
 });
 
 afterEach(() => {
   setGeminiClientForTests(null);
-  delete process.env.GEMINI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
   __resetMemoryUsageSinkForTests();
   resetUsageSinkForTests();
 });
