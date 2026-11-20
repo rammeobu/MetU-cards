@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 
 import { ExpenseMemberChips } from "@/components/ledger/ExpenseMemberChips";
-import { ExpensePayerSheet } from "@/components/ledger/ExpensePayerSheet";
 import { SplitPreviewSheet } from "@/components/ledger/SplitPreviewSheet";
 import type {
   SplitPatch,
@@ -49,7 +48,6 @@ export function ExpenseChipSplit({
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [doneMsg, setDoneMsg] = useState("");
-  const [payerOpen, setPayerOpen] = useState(false);
   const [staleSettle, setStaleSettle] = useState(false);
 
   const interactive = useMemo(() => {
@@ -190,21 +188,17 @@ export function ExpenseChipSplit({
   const hasShares = Object.keys(expense.shares ?? {}).length > 0;
 
   return (
-    <li className="rounded-mu-lg border border-mu-line bg-mu-card px-4 py-4 text-mu-body">
-      <div className="flex items-start justify-between gap-3">
+    <li className="rounded-xl bg-surface-soft px-3 py-3 text-xs">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-mu-body font-semibold text-mu-fg">
+          <p className="truncate font-semibold text-ink-heading">
             {expense.merchant || expense.label}
           </p>
           {payerName ? (
-            <p className="mt-0.5 text-mu-caption text-mu-fg-3">
-              결제 {payerName}
-            </p>
+            <p className="mt-0.5 text-ink-muted">결제 {payerName}</p>
           ) : null}
         </div>
-        <span className="mu-num shrink-0 text-mu-body font-bold text-mu-fg">
-          {formatKRW(expense.krwAmount)}
-        </span>
+        <span className="shrink-0 font-bold">{formatKRW(expense.krwAmount)}</span>
       </div>
 
       {hasShares ? (
@@ -241,7 +235,7 @@ export function ExpenseChipSplit({
           <button
             type="button"
             disabled={Boolean(busy)}
-            className="mu-focus inline-flex min-h-tap items-center rounded-mu-md border border-mu-warn px-3 text-mu-caption font-bold text-mu-warn disabled:opacity-40"
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-600 px-3 text-xs font-bold text-amber-800 disabled:opacity-40"
             onClick={() => void onUndo()}
           >
             되돌리기
@@ -250,48 +244,23 @@ export function ExpenseChipSplit({
       ) : null}
 
       {!preview && error ? (
-        <p role="alert" className="mt-2 font-semibold text-mu-err">
+        <p role="alert" className="mt-2 font-semibold text-danger">
           {error}
         </p>
       ) : null}
       {!preview && doneMsg ? (
-        <p role="status" className="mt-2 font-semibold text-mu-ok">
+        <p role="status" className="mt-2 font-semibold text-emerald-800">
           {doneMsg}
         </p>
       ) : null}
-      {isOwner && !isAnonymous ? (
-        <button
-          type="button"
-          className="mu-focus mt-2 inline-flex min-h-tap items-center text-mu-caption font-bold text-mu-accent"
-          onClick={() => setPayerOpen(true)}
-        >
-          결제자 바꾸기
-        </button>
-      ) : null}
-
       {staleSettle && isOwner && settleHref ? (
-        <p className="mt-2 text-mu-fg-3">
+        <p className="mt-2 text-ink-muted">
           정산이 오래됐어요.{" "}
-          <a href={settleHref} className="font-bold text-mu-accent underline">
+          <a href={settleHref} className="font-bold text-brand underline">
             정산 화면
           </a>
           에서 다시 계산해 주세요.
         </p>
-      ) : null}
-
-      {isOwner && !isAnonymous ? (
-        <ExpensePayerSheet
-          open={payerOpen}
-          onClose={() => setPayerOpen(false)}
-          expenseId={expense.id}
-          members={members}
-          currentPayerId={expense.paidBy}
-          onSaved={async () => {
-            setStaleSettle(true);
-            setDoneMsg("결제자를 바꿨어요. 정산이 오래됐을 수 있어요.");
-            await onChanged();
-          }}
-        />
       ) : null}
     </li>
   );

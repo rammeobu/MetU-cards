@@ -13,7 +13,6 @@ const eslintConfig = [
       ".next/**",
       "node_modules/**",
       "coverage/**",
-      ".agents/**",
       "public/sw.js",
       "scripts/**",
       "vitest.config.ts",

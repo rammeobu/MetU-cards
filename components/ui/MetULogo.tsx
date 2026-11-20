@@ -1,7 +1,4 @@
-import Image from "next/image";
-import Link from "next/link";
-
-type MetULogoVariant = "appbar" | "hero";
+export type MetULogoVariant = "appbar" | "hero";
 
 interface MetULogoProps {
   variant?: MetULogoVariant;
@@ -10,8 +7,7 @@ interface MetULogoProps {
   className?: string;
 }
 
-/** 웹 상단·로그인 히어로 공통: 가로 워드마크 + 마스코트 (투명 배경). */
-const LOCKUP_SRC = "/brand/metu-lockup.png";
+const GRADIENT_TEXT = "ai-gradient-text";
 
 export function MetULogo({
   variant = "appbar",
@@ -22,37 +18,40 @@ export function MetULogo({
     return (
       <div className={`flex flex-col items-center gap-3 ${className}`}>
         {showPlannerBadge ? (
-          <span className="rounded-full border border-mu-line bg-mu-accent-soft px-3 py-1 text-xs font-bold text-mu-accent">
-            AI 여행 플래너
-          </span>
+          <span className="ai-chip">AI 여행 플래너</span>
         ) : null}
-        {/* 상단바와 같은 lockup (사각 아이콘 칩 없음) */}
-        <Image
-          src={LOCKUP_SRC}
-          alt="MetU"
-          width={280}
-          height={112}
-          priority
-          className="h-16 w-auto max-w-[14rem] object-contain"
-        />
+        <LogoMark size="hero" />
       </div>
     );
   }
 
   return (
-    <Link
-      href="/"
-      aria-label="MetU 홈"
-      className={`mu-focus inline-flex items-center ${className}`}
-    >
-      <Image
-        src={LOCKUP_SRC}
-        alt=""
-        width={120}
-        height={48}
-        priority
-        className="h-8 w-auto max-w-[8rem] object-contain object-left"
-      />
-    </Link>
+    <span className={className}>
+      <LogoMark size="appbar" />
+    </span>
+  );
+}
+
+function LogoMark({ size }: { size: "hero" | "appbar" }) {
+  const textSize =
+    size === "hero" ? "text-[40px] leading-none" : "text-lg leading-none";
+
+  const aiSize =
+    size === "hero" ? "px-1.5 py-0.5 text-[11px]" : "px-1 py-px text-[9px]";
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${textSize}`}>
+      <span className={`font-extrabold tracking-tight ${GRADIENT_TEXT}`}>
+        Met U
+      </span>
+      <span
+        className={[
+          "rounded-md border border-brand/20 bg-gradient-to-r from-brand/12 to-brand-soft/12 font-bold tracking-wider text-brand",
+          aiSize,
+        ].join(" ")}
+      >
+        AI
+      </span>
+    </span>
   );
 }

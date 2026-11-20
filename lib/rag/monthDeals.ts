@@ -13,7 +13,7 @@ export interface MonthDealTip {
   caution: string;
 }
 
-const MONTH_DEAL_TIPS: MonthDealTip[] = [
+export const MONTH_DEAL_TIPS: MonthDealTip[] = [
   {
     month: 1,
     cheapPlaces: ["런던", "파리", "오사카", "방콕"],

@@ -29,6 +29,7 @@ vi.mock("@/components/ui/MetULogo", () => ({
 }));
 
 const signInWithKakao = vi.fn();
+const continueAsGuest = vi.fn();
 
 vi.mock("@/components/auth/useAuthActions", () => ({
   useAuthActions: () => ({
@@ -36,6 +37,7 @@ vi.mock("@/components/auth/useAuthActions", () => ({
     signInWithEmail: vi.fn(),
     signUpWithEmail: vi.fn(),
     resendConfirmation: vi.fn(),
+    continueAsGuest,
   }),
 }));
 
@@ -56,6 +58,7 @@ afterEach(() => {
 
 describe("LoginContent", () => {
   beforeEach(() => {
+    continueAsGuest.mockResolvedValue({ ok: true });
     signInWithKakao.mockResolvedValue({ ok: true });
     vi.spyOn(window, "setInterval");
   });
@@ -82,11 +85,27 @@ describe("LoginContent", () => {
     expect(window.setInterval).not.toHaveBeenCalled();
   });
 
-  it("does not offer browse-as-guest", () => {
+  it("shows guest loading state with aria-busy", async () => {
+    let resolveGuest: (value: { ok: true }) => void = () => {};
+    continueAsGuest.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveGuest = resolve;
+        })
+    );
+
     render(<LoginContent />);
-    expect(
-      screen.queryByRole("button", { name: "로그인 없이 둘러보기" })
-    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "로그인 없이 둘러보기" })
+    );
+
+    const busyBtn = screen.getByRole("button", { name: /들어가는 중/ });
+    expect(busyBtn.getAttribute("aria-busy")).toBe("true");
+
+    resolveGuest({ ok: true });
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalled();
+    });
   });
 
   it("updates post-login status after 5 seconds", () => {

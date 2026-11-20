@@ -10,8 +10,6 @@ const useAuth = vi.fn();
 const listMembers = vi.fn();
 const listExpenses = vi.fn();
 const fetchLatestSettlement = vi.fn();
-const fetchSettlementHistory = vi.fn();
-const listVoidedExpenseIds = vi.fn();
 const getBrowserSupabase = vi.fn();
 const useAutomationStatus = vi.fn();
 
@@ -20,9 +18,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace }),
 }));
 vi.mock("@/lib/auth/AuthProvider", () => ({ useAuth: () => useAuth() }));
-vi.mock("@/lib/trips/TripProvider", () => ({
-  useTrips: () => ({ getTrip: () => undefined }),
-}));
 vi.mock("@/lib/hooks/useAutomationStatus", () => ({
   useAutomationStatus: (...a: unknown[]) => useAutomationStatus(...a),
 }));
@@ -32,14 +27,9 @@ vi.mock("@/lib/ledger/supabase", () => ({
   listCardProfiles: vi.fn(async () => []),
   ensureOwnerMember: vi.fn(),
   fetchLatestSettlement: (...a: unknown[]) => fetchLatestSettlement(...a),
-  fetchSettlementHistory: (...a: unknown[]) => fetchSettlementHistory(...a),
-  listVoidedExpenseIds: (...a: unknown[]) => listVoidedExpenseIds(...a),
 }));
 vi.mock("@/lib/supabase/browser", () => ({
   getBrowserSupabase: () => getBrowserSupabase(),
-}));
-vi.mock("@/lib/ledger/open-suggestions", () => ({
-  fetchOpenBudgetSuggestions: vi.fn(async () => []),
 }));
 vi.mock("@/components/ledger/ExpenseConfirmSheet", () => ({
   ExpenseConfirmSheet: () => null,
@@ -59,12 +49,6 @@ vi.mock("@/components/ledger/VoiceInputButton", () => ({
 vi.mock("@/components/ledger/CardProfileSettings", () => ({
   CardProfileSettings: () => <button type="button">카드 수수료 추가</button>,
 }));
-vi.mock("@/components/ledger/HostPayoutSettings", () => ({
-  HostPayoutSettings: () => <button type="button">입금 계좌 저장</button>,
-}));
-vi.mock("@/components/ledger/HostTransferSettings", () => ({
-  HostTransferSettings: () => <button type="button">호스트 넘기기</button>,
-}));
 vi.mock("@/components/ledger/CashRateSettings", () => ({
   CashRateSettings: () => null,
 }));
@@ -73,20 +57,6 @@ vi.mock("@/components/trips/ledger/TripInvitePanel", () => ({
 }));
 vi.mock("@/components/ui/OfflineBanner", () => ({
   OfflineBanner: () => null,
-}));
-vi.mock("@/components/ledger/SplitBatchBox", () => ({
-  SplitBatchBox: () => <div>한 줄 분담</div>,
-}));
-vi.mock("@/components/ledger/GuestExpenseSlot", () => ({
-  GuestExpenseSlot: () => <div>내가 냈어요 슬롯</div>,
-}));
-vi.mock("@/components/ledger/ExpenseChipSplit", () => ({
-  ExpenseChipSplit: ({ expense }: { expense: { merchant: string } }) => (
-    <li>칩 {expense.merchant}</li>
-  ),
-}));
-vi.mock("@/components/ledger/MyShareCard", () => ({
-  MyShareCard: () => <div>내 몫 카드</div>,
 }));
 
 import { TripJourney } from "./TripJourney";
@@ -100,7 +70,6 @@ beforeEach(() => {
     provider: "kakao",
     isReady: true,
     isLoggedIn: true,
-    isAnonymous: false,
   });
   useAutomationStatus.mockReturnValue({
     data: { hasActiveToken: true },
@@ -112,38 +81,14 @@ beforeEach(() => {
     { id: "m2", tripId: "t1", displayName: "다라", isOwner: false, userId: "u2" },
   ]);
   listExpenses.mockResolvedValue([
-    {
-      id: "e1",
-      tripId: "t1",
-      paidBy: "m1",
-      krwAmount: 1000,
-      amount: 1000,
-      currency: "KRW",
-      fxRateToKrw: 1,
-      merchant: "카페",
-      label: "카페",
-      category: "식비",
-      splitType: "equal",
-      shares: { m1: 500, m2: 500 },
-    },
+    { id: "e1", krwAmount: 1000, merchant: "카페", label: "카페" },
   ]);
   fetchLatestSettlement.mockResolvedValue({ ok: true, settlement: null });
-  fetchSettlementHistory.mockResolvedValue([]);
-  listVoidedExpenseIds.mockResolvedValue(new Set());
-  const chain: Record<string, unknown> = {};
-  const result = { count: 0, data: null, error: null };
-  const asThenable = {
-    then: (
-      resolve: (v: typeof result) => unknown,
-      reject?: (e: unknown) => unknown
-    ) => Promise.resolve(result).then(resolve, reject),
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    in: () => Promise.resolve({ count: 0, error: null }),
   };
-  chain.select = () => chain;
-  chain.eq = () => chain;
-  chain.in = () => Object.assign(asThenable, chain);
-  chain.order = () => chain;
-  chain.limit = () => chain;
-  chain.maybeSingle = async () => result;
   getBrowserSupabase.mockReturnValue({ from: () => chain });
 });
 
@@ -166,49 +111,20 @@ describe("TripJourney", () => {
   it("?step 무효면 기본 단계로 해석해요", async () => {
     search = "step=hack";
     render(<TripJourney tripId="t1" />);
-    await screen.findByRole("navigation", { name: "가계부 · 정산" });
-    // settle 기본 → SettleStep 이 CTA 소유 (로드 후 버튼 등장)
-    expect(
-      await screen.findByRole("heading", { name: "이 금액으로 정산해요" })
-    ).toBeTruthy();
-    expect(
-      await screen.findByRole("button", { name: "정산 계산하기" })
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "정산 화면 열기" })).toBeNull();
+    await screen.findByRole("navigation", { name: "정산 단계" });
+    // CTA for settle default
+    expect(screen.getByRole("button", { name: "정산 화면 열기" })).toBeTruthy();
   });
 
-  it("?step=settle 은 SettleStep 을 보여 주고 TripJourney CTA 는 없어요", async () => {
+  it("칸 탭 시 step 쿼리를 push해요", async () => {
     search = "step=settle";
     render(<TripJourney tripId="t1" />);
-    expect(
-      await screen.findByRole("heading", { name: "이 금액으로 정산해요" })
-    ).toBeTruthy();
-    expect(
-      await screen.findByRole("button", { name: "분담 수정하기" })
-    ).toBeTruthy();
-    expect(
-      await screen.findAllByRole("button", { name: "정산 계산하기" })
-    ).toHaveLength(1);
-  });
-
-  it("?step=pay 는 PayStep 을 보여 주고 TripJourney CTA 는 없어요", async () => {
-    search = "step=pay";
-    render(<TripJourney tripId="t1" />);
-    expect(
-      await screen.findByText("먼저 정산을 계산해요")
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "정산 화면 열기" })).toBeNull();
-  });
-
-  it("묶음 칸 탭 시 세부 step 쿼리를 push해요", async () => {
-    search = "step=settle";
-    render(<TripJourney tripId="t1" />);
-    await screen.findByRole("navigation", { name: "가계부 · 정산" });
-    const nav = screen.getByRole("navigation", { name: "가계부 · 정산" });
-    const prepBtn = Array.from(nav.querySelectorAll("button")).find((b) =>
-      (b.getAttribute("aria-label") ?? "").startsWith("준비")
+    await screen.findByRole("navigation", { name: "정산 단계" });
+    const nav = screen.getByRole("navigation", { name: "정산 단계" });
+    const inviteBtn = Array.from(nav.querySelectorAll("button")).find((b) =>
+      (b.getAttribute("aria-label") ?? "").startsWith("초대")
     );
-    fireEvent.click(prepBtn!);
+    fireEvent.click(inviteBtn!);
     expect(push).toHaveBeenCalledWith(
       expect.stringContaining("step=invite"),
       { scroll: false }
@@ -225,85 +141,5 @@ describe("TripJourney", () => {
       )
     );
     expect(await screen.findByText("영수증 촬영하기")).toBeTruthy();
-  });
-
-  it("?step=connect 딥링크는 연결 단계 화면을 보여 줘요", async () => {
-    search = "step=connect";
-    render(<TripJourney tripId="t1" />);
-    expect(await screen.findByRole("heading", { name: "자동 수집이 켜져 있어요" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "다음: 멤버 초대" })).toBeTruthy();
-    expect(replace).not.toHaveBeenCalled();
-  });
-
-  it("?step=invite 딥링크는 초대 단계 화면(참여 현황)을 보여 줘요", async () => {
-    search = "step=invite";
-    render(<TripJourney tripId="t1" />);
-    expect(await screen.findByRole("heading", { name: "참여한 사람" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "동행자를 초대해요" })).toBeTruthy();
-    expect(replace).not.toHaveBeenCalled();
-  });
-
-  it("?step=adjust 는 분담 단계를 보여 주고, CTA 는 AdjustStep 의 「문제없어요, 정산할게요」 하나예요", async () => {
-    search = "step=adjust";
-    render(<TripJourney tripId="t1" />);
-    expect(
-      await screen.findByRole("heading", { name: "정산 전에 안 맞는 게 있나요?" })
-    ).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "문제없어요, 정산할게요" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "다음: 정산하기" })).toBeNull();
-  });
-
-  describe("게스트(익명)", () => {
-    beforeEach(() => {
-      useAuth.mockReturnValue({
-        user: { id: "u2", is_anonymous: true, user_metadata: {} },
-        provider: "supabase",
-        isReady: true,
-        isLoggedIn: true,
-      });
-    });
-
-    it("?step=adjust 에 머물고 조정 도구를 보여 줘요", async () => {
-      search = "step=adjust";
-      render(<TripJourney tripId="t1" />);
-      expect(await screen.findByText("한 줄로 내 몫 바꾸기")).toBeTruthy();
-      expect(screen.getByText("한 줄 분담")).toBeTruthy();
-      expect(screen.getByText("내가 냈어요 슬롯")).toBeTruthy();
-      expect(await screen.findByText("칩 카페")).toBeTruthy();
-      expect(replace).not.toHaveBeenCalled();
-    });
-
-    it("?step=pay 에도 머물러요", async () => {
-      search = "step=pay";
-      render(<TripJourney tripId="t1" />);
-      await screen.findByRole("navigation", { name: "가계부 · 정산" });
-      await waitFor(() => expect(listMembers).toHaveBeenCalled());
-      expect(replace).not.toHaveBeenCalled();
-    });
-
-    it("호스트 전용 단계(?step=record)는 게스트 기본 단계로 바꿔요", async () => {
-      search = "step=record";
-      render(<TripJourney tripId="t1" />);
-      await waitFor(() =>
-        expect(replace).toHaveBeenCalledWith(
-          expect.stringContaining("step=share"),
-          { scroll: false }
-        )
-      );
-    });
-
-    it("게스트 칸 탭은 게스트 키만 push 해요", async () => {
-      search = "step=share";
-      render(<TripJourney tripId="t1" />);
-      const nav = await screen.findByRole("navigation", { name: "가계부 · 정산" });
-      const payBtn = Array.from(nav.querySelectorAll("button")).find((b) =>
-        (b.getAttribute("aria-label") ?? "").startsWith("송금")
-      );
-      fireEvent.click(payBtn!);
-      expect(push).toHaveBeenCalledWith(
-        expect.stringContaining("step=pay"),
-        { scroll: false }
-      );
-    });
   });
 });

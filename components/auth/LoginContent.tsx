@@ -20,12 +20,14 @@ const FEATURES = ["예산 맞춤", "AI 일정", "자동 가계부", "정산"] as
 export function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { signInWithKakao } = useAuthActions();
+  const { signInWithKakao, continueAsGuest } = useAuthActions();
 
   const [kakaoLoading, setKakaoLoading] = useState(false);
   const [kakaoSlowHint, setKakaoSlowHint] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [error, setError] = useState<UserFacingError | null>(null);
+  const [guestError, setGuestError] = useState(false);
   const [postLoginStatus, setPostLoginStatus] = useState<string | null>(null);
   const deleted = searchParams.get("deleted") === "1";
   const slowLoginTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,9 +99,10 @@ export function LoginContent() {
   }, [kakaoLoading]);
 
   const handleKakaoLogin = async () => {
-    if (kakaoLoading) return;
+    if (kakaoLoading || guestLoading) return;
     setKakaoLoading(true);
     setError(null);
+    setGuestError(false);
 
     const result = await signInWithKakao();
     if (!result.ok) {
@@ -108,20 +111,35 @@ export function LoginContent() {
     }
   };
 
+  const handleGuest = async () => {
+    if (guestLoading || kakaoLoading) return;
+    setGuestLoading(true);
+    setGuestError(false);
+    setError(null);
+
+    const result = await continueAsGuest();
+    if (!result.ok) {
+      setGuestError(true);
+      setGuestLoading(false);
+      return;
+    }
+    goNext();
+  };
+
   const handleEmailSignedIn = () => {
     startPostLoginStatus();
     goNext();
   };
 
-  const anyLoading = kakaoLoading;
+  const anyLoading = kakaoLoading || guestLoading;
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-y-auto overscroll-contain bg-mu-bg">
+    <div className="relative flex min-h-dvh flex-col overflow-y-auto overscroll-contain bg-surface-base">
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
         <div className="absolute inset-0 bg-gradient-to-b from-surface-base via-canvas to-canvas-deep" />
-        <div className="absolute -left-16 top-8 h-48 w-48 rounded-full bg-mu-accent-soft blur-3xl" />
-        <div className="absolute -right-10 top-28 h-40 w-40 rounded-full bg-mu-accent-mid/12 blur-3xl" />
-        <div className="absolute bottom-48 left-1/2 h-28 w-56 -translate-x-1/2 rounded-full bg-mu-accent/[0.06] blur-2xl" />
+        <div className="absolute -left-16 top-8 h-48 w-48 rounded-full bg-brand/10 blur-3xl" />
+        <div className="absolute -right-10 top-28 h-40 w-40 rounded-full bg-brand-mid/12 blur-3xl" />
+        <div className="absolute bottom-48 left-1/2 h-28 w-56 -translate-x-1/2 rounded-full bg-brand/[0.06] blur-2xl" />
       </div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-mobile flex-1 flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -130,13 +148,13 @@ export function LoginContent() {
             <MetULogo variant="hero" showPlannerBadge />
 
             <div className="flex max-w-prose flex-col items-center gap-3">
-              <p className="text-xs font-semibold tracking-wide text-mu-accent">
+              <p className="text-xs font-semibold tracking-wide text-brand-strong">
                 Nice to Met U!
               </p>
-              <h1 className="text-lg font-bold leading-7 tracking-tight text-mu-fg">
+              <h1 className="text-lg font-bold leading-7 tracking-tight text-ink-heading">
                 여행 경비, 같이 쓰고 알아서 정산해요
               </h1>
-              <p className="text-sm leading-6 text-mu-fg-2">
+              <p className="text-sm leading-6 text-ink-body">
                 카드 알림이 오면 자동으로 가계부에 적고, 동행과 정산까지 한 번에
                 끝내요.
               </p>
@@ -144,7 +162,7 @@ export function LoginContent() {
                 {FEATURES.map((feature, index) => (
                   <span
                     key={feature}
-                    className="rounded-full border border-mu-line bg-mu-card animate-fade-up px-3 py-1.5 text-xs"
+                    className="ai-glass-chip animate-fade-up px-3 py-1.5 text-xs"
                     style={{ animationDelay: `${120 + index * 80}ms` }}
                   >
                     {feature}
@@ -160,7 +178,7 @@ export function LoginContent() {
           style={{ animationDelay: "180ms" }}
         >
           <div className="flex flex-col gap-3">
-            {deleted && !error ? (
+            {deleted && !error && !guestError ? (
               <AuthMessage kind="info">
                 회원 탈퇴가 완료되었어요. 이용해 주셔서 감사합니다.
               </AuthMessage>
@@ -168,8 +186,19 @@ export function LoginContent() {
             {error ? (
               <AuthMessage kind="error">{error.message}</AuthMessage>
             ) : null}
+            {guestError ? (
+              <AuthMessage
+                kind="error"
+                action={{
+                  label: "다시 시도",
+                  onClick: () => void handleGuest(),
+                }}
+              >
+                둘러보기를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.
+              </AuthMessage>
+            ) : null}
             {postLoginStatus ? (
-              <p role="status" className="text-center text-xs text-mu-fg-2">
+              <p role="status" className="text-center text-xs text-ink-body">
                 {postLoginStatus}
               </p>
             ) : null}
@@ -179,7 +208,7 @@ export function LoginContent() {
               onClick={() => void handleKakaoLogin()}
               disabled={anyLoading}
               aria-busy={kakaoLoading}
-              className="relative flex min-h-touch w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-kakao text-base font-bold text-kakao-ink shadow-kakao-sm transition-transform active:scale-99 disabled:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent/40"
+              className="relative flex min-h-touch w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-kakao text-base font-bold text-kakao-ink shadow-kakao-sm transition-transform active:scale-99 disabled:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
               {kakaoLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
@@ -189,7 +218,7 @@ export function LoginContent() {
               {kakaoLoading ? "카카오로 이동 중…" : "카카오 간편로그인"}
             </button>
             {kakaoSlowHint ? (
-              <p className="text-center text-xs text-mu-fg-3">
+              <p className="text-center text-xs text-ink-caption">
                 오래 걸리면 다시 눌러 주세요
               </p>
             ) : null}
@@ -199,21 +228,44 @@ export function LoginContent() {
               onClick={() => {
                 setEmailOpen((prev) => !prev);
                 setError(null);
+                setGuestError(false);
               }}
               disabled={anyLoading}
               aria-expanded={emailOpen}
-              className="flex min-h-touch w-full items-center justify-center gap-2 rounded-2xl border border-mu-line bg-mu-card text-sm font-bold text-mu-fg shadow-sm transition-colors active:scale-99 active:bg-mu-sunken disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent/40"
+              className="flex min-h-touch w-full items-center justify-center gap-2 rounded-2xl border border-line-soft bg-surface-white text-sm font-bold text-ink-heading shadow-sm transition-all active:scale-99 active:bg-surface-soft disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
-              <Mail className="h-4 w-4 text-mu-accent" strokeWidth={2.4} />
+              <Mail className="h-4 w-4 text-brand" strokeWidth={2.4} />
               이메일로 계속하기
             </button>
 
             {emailOpen ? (
               <EmailAuthForm variant="full" onSignedIn={handleEmailSignedIn} />
             ) : null}
+
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => void handleGuest()}
+                disabled={anyLoading}
+                aria-busy={guestLoading}
+                className="min-h-touch w-full rounded-2xl border-0 bg-surface-white text-sm font-semibold text-ink-body shadow-sm backdrop-blur-sm transition-all active:scale-99 active:bg-surface-soft disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+              >
+                {guestLoading ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    들어가는 중…
+                  </span>
+                ) : (
+                  "로그인 없이 둘러보기"
+                )}
+              </button>
+              <p className="text-center text-xs leading-5 text-ink-body">
+                둘러보기에서는 저장과 자동 기록 연결 같은 일부 기능이 제한돼요.
+              </p>
+            </div>
           </div>
 
-          <p className="text-center text-xs leading-5 text-mu-fg-2">
+          <p className="text-center text-xs leading-5 text-ink-body">
             계속하면{" "}
             <Link href="/legal/terms" className="underline underline-offset-2">
               이용약관

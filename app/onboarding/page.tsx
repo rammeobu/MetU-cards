@@ -1,61 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState, Suspense } from "react";
-import { ChevronLeft } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGoBack } from "@/lib/navigation/useGoBack";
-import { PrimaryFooter, ScreenHeader } from "@/components/ds";
-import { BudgetKeypadStep } from "@/components/onboarding/BudgetKeypadStep";
-import { ConfirmPlanStep } from "@/components/onboarding/ConfirmPlanStep";
+import { TopAppBar } from "@/components/ui/TopAppBar";
+import { ProgressBar } from "@/components/ui/ProgressBar";
+import { PrimaryButton } from "@/components/ui/PrimaryButton";
+import { BudgetStep } from "@/components/onboarding/BudgetStep";
+import { PartyStep } from "@/components/onboarding/PartyStep";
+import { ScheduleStep } from "@/components/onboarding/ScheduleStep";
+import { StyleStep } from "@/components/onboarding/StyleStep";
 import { AIThinkingOverlay } from "@/components/onboarding/AIThinkingOverlay";
 import {
+  INITIAL_FORM,
   isFlexibleScheduleValid,
-  type OnboardingForm,
-} from "@/lib/onboarding/types";
+  type TravelStyle,
+} from "@/components/onboarding/types";
 import {
   isKangwonUniversityDestination,
   KANGWON_GRAD_ADMISSION_URL,
 } from "@/lib/easter/kangwon-univ";
-import {
-  clearTravelDraft,
-  emptyTravelDraft,
-  loadTravelDraft,
-  saveTravelDraft,
-} from "@/lib/onboarding/travel-draft";
-import { parseBudgetAmount } from "@/lib/ai/budget-insight";
-import { useAuth } from "@/lib/auth/AuthProvider";
 
-const TOTAL_STEPS = 2;
-
-/** 한 줄 NL에서 목적지 힌트를 골라요. 쉼표/조사 앞 토큰 우선. */
-function hintDestination(freeText: string): string {
-  const raw = freeText.trim();
-  if (!raw) return "";
-  const first = raw.split(/[,，\s]/)[0]?.trim() ?? "";
-  return first.slice(0, 40);
-}
+const TOTAL_STEPS = 4;
 
 function OnboardingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const goBack = useGoBack("/");
-  const { isReady, isLoggedIn, provider } = useAuth();
-  const restored = useMemo(() => loadTravelDraft() ?? emptyTravelDraft(), []);
-  const [step, setStep] = useState(() => Math.min(TOTAL_STEPS, restored.step));
-  const [form, setForm] = useState(restored.form);
-  const [freeText, setFreeText] = useState("");
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(INITIAL_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isReady) return;
-    if (!isLoggedIn || provider === "guest") {
-      router.replace(
-        `/login?next=${encodeURIComponent("/onboarding")}`
-      );
-    }
-  }, [isReady, isLoggedIn, provider, router]);
 
   useEffect(() => {
     const error = searchParams.get("error");
@@ -65,38 +41,38 @@ function OnboardingPageContent() {
     }
   }, [router, searchParams]);
 
-  useEffect(() => {
-    saveTravelDraft({ step, form });
-  }, [step, form]);
+  const toggleStyle = (style: TravelStyle) => {
+    setForm((prev) => ({
+      ...prev,
+      styles: prev.styles.includes(style)
+        ? prev.styles.filter((s) => s !== style)
+        : [...prev.styles, style],
+    }));
+  };
 
   const canProceed = useMemo(() => {
-    if (step === 1) return parseBudgetAmount(form.budget) > 0;
-    if (step === 2) {
-      const dest =
-        form.destination.trim() || hintDestination(freeText);
-      if (!dest) return false;
-      if (form.people < 1) return false;
-      if (form.styles.length === 0) return false;
-      if (form.dateType === "specific") {
-        return form.startDate.length > 0 && form.endDate.length > 0;
-      }
-      return isFlexibleScheduleValid(form.flexibleMonth, form.flexibleYear);
+    switch (step) {
+      case 1:
+        return form.budget.trim().length > 0;
+      case 2:
+        return form.people >= 1;
+      case 3:
+        if (
+          form.origin.trim().length === 0 ||
+          form.destination.trim().length === 0
+        ) {
+          return false;
+        }
+        if (form.dateType === "specific") {
+          return form.startDate.length > 0 && form.endDate.length > 0;
+        }
+        return isFlexibleScheduleValid(form.flexibleMonth, form.flexibleYear);
+      case 4:
+        return form.styles.length > 0;
+      default:
+        return false;
     }
-    return false;
-  }, [step, form, freeText]);
-
-  const proceedHint = useMemo(() => {
-    if (step !== 2 || canProceed) return undefined;
-    const dest = form.destination.trim() || hintDestination(freeText);
-    if (!dest) return "목적지를 골라 주세요";
-    if (form.styles.length === 0) return "여행 스타일을 하나 이상 골라 주세요";
-    if (form.dateType === "specific") {
-      if (!form.startDate || !form.endDate) return "출발·귀국 날짜를 선택해 주세요";
-    } else if (!isFlexibleScheduleValid(form.flexibleMonth, form.flexibleYear)) {
-      return "예정 연·월을 확인해 주세요";
-    }
-    return undefined;
-  }, [step, canProceed, form, freeText]);
+  }, [step, form]);
 
   const handleBack = () => {
     if (isSubmitting || showThinking) return;
@@ -104,33 +80,22 @@ function OnboardingPageContent() {
     goBack();
   };
 
-  const patchForm = (patch: Partial<OnboardingForm>) => {
-    setForm((prev) => ({ ...prev, ...patch }));
-  };
-
   const handleNext = async () => {
-    if (!canProceed) return;
+    // 도착지 이스터에그: 강원대학교 → 대학원 입시 모집요강
+    if (
+      step === 3 &&
+      canProceed &&
+      isKangwonUniversityDestination(form.destination)
+    ) {
+      window.location.assign(KANGWON_GRAD_ADMISSION_URL);
+      return;
+    }
 
     if (step < TOTAL_STEPS) {
       setSubmitError(null);
       return setStep((s) => s + 1);
     }
     if (isSubmitting) return;
-
-    const destination =
-      form.destination.trim() || hintDestination(freeText) || "추천";
-    const origin = form.origin.trim() || "서울";
-
-    if (isKangwonUniversityDestination(destination)) {
-      window.location.assign(KANGWON_GRAD_ADMISSION_URL);
-      return;
-    }
-
-    const payload: OnboardingForm = {
-      ...form,
-      origin,
-      destination,
-    };
 
     try {
       setSubmitError(null);
@@ -140,11 +105,10 @@ function OnboardingPageContent() {
       const res = await fetch("/api/onboarding/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error("onboarding-session-save-failed");
 
-      clearTravelDraft();
       router.push("/onboarding/result");
     } catch {
       setShowThinking(false);
@@ -155,88 +119,114 @@ function OnboardingPageContent() {
     }
   };
 
-  if (!isReady || !isLoggedIn || provider === "guest") {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-mu-bg">
-        <div className="h-10 w-10 animate-pulse rounded-mu-lg bg-mu-accent-soft" />
-      </div>
-    );
-  }
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-mu-bg">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {showThinking && (
         <AIThinkingOverlay
-          destination={
-            (form.destination.trim() || hintDestination(freeText) || "여행지")
-              .split(/[,，]/)[0]
-              ?.trim()
-          }
+          destination={form.destination.split(/[,，]/)[0]?.trim()}
         />
       )}
 
-      <ScreenHeader
-        title={step === 1 ? "예산" : "일정 확인"}
-        left={
-          <button
-            type="button"
-            onClick={handleBack}
-            aria-label="뒤로"
-            className="mu-focus flex h-11 w-11 items-center justify-center rounded-mu-md text-mu-fg"
-          >
-            <ChevronLeft className="h-6 w-6" aria-hidden />
-          </button>
-        }
-        right={
-          <span className="text-mu-caption font-medium text-mu-fg-3">
-            {step}/{TOTAL_STEPS}
-          </span>
-        }
+      <TopAppBar
+        title="여행 계획하기"
+        showBack
+        backHref="/"
+        onBack={handleBack}
       />
 
-      <main className="flex-1 px-5 pb-36 pt-6">
-        <p className="sr-only" aria-live="polite">
-          {step}/{TOTAL_STEPS} 단계
-        </p>
-        {step === 1 ? (
-          <BudgetKeypadStep
+      <div className="sticky top-14 z-30 border-b border-line-soft/60 bg-surface-base/90 px-5 py-3 backdrop-blur-md">
+        <ProgressBar current={step} total={TOTAL_STEPS} />
+      </div>
+
+      <main className="flex-1 px-5 pb-28 pt-6">
+        {step === 1 && (
+          <BudgetStep
             value={form.budget}
-            onChange={(budget) => patchForm({ budget })}
+            onChange={(budget) => setForm((p) => ({ ...p, budget }))}
           />
-        ) : (
-          <ConfirmPlanStep
-            form={form}
-            freeText={freeText}
-            onFreeTextChange={setFreeText}
-            onChange={patchForm}
+        )}
+        {step === 2 && (
+          <PartyStep
+            value={form.people}
+            budget={form.budget}
+            onChange={(people) => setForm((p) => ({ ...p, people }))}
           />
+        )}
+        {step === 3 && (
+          <ScheduleStep
+            origin={form.origin}
+            destination={form.destination}
+            dateType={form.dateType}
+            startDate={form.startDate}
+            endDate={form.endDate}
+            flexibleYear={form.flexibleYear}
+            flexibleMonth={form.flexibleMonth}
+            budget={form.budget}
+            people={form.people}
+            onOriginChange={(origin) => setForm((p) => ({ ...p, origin }))}
+            onDestinationChange={(destination) =>
+              setForm((p) => ({ ...p, destination }))
+            }
+            onDateTypeChange={(dateType) =>
+              setForm((p) => ({
+                ...p,
+                dateType,
+                startDate: dateType === "specific" ? p.startDate : "",
+                endDate: dateType === "specific" ? p.endDate : "",
+              }))
+            }
+            onStartDateChange={(startDate) =>
+              setForm((p) => ({
+                ...p,
+                startDate,
+                endDate: p.endDate && p.endDate < startDate ? "" : p.endDate,
+              }))
+            }
+            onEndDateChange={(endDate) => setForm((p) => ({ ...p, endDate }))}
+            onFlexibleYearChange={(flexibleYear) =>
+              setForm((p) => {
+                const now = new Date();
+                let flexibleMonth = p.flexibleMonth;
+                if (
+                  flexibleYear === now.getFullYear() &&
+                  flexibleMonth < now.getMonth() + 1
+                ) {
+                  flexibleMonth = now.getMonth() + 1;
+                }
+                return { ...p, flexibleYear, flexibleMonth };
+              })
+            }
+            onFlexibleMonthChange={(flexibleMonth) =>
+              setForm((p) => ({ ...p, flexibleMonth }))
+            }
+          />
+        )}
+        {step === 4 && (
+          <StyleStep selected={form.styles} onToggle={toggleStyle} />
         )}
       </main>
 
-      {submitError ? (
-        <p
-          role="alert"
-          className="fixed inset-x-0 bottom-[5.5rem] z-40 mx-auto w-full max-w-mobile px-5 text-center text-mu-caption font-semibold text-mu-err"
+      <footer className="sticky bottom-0 z-30 border-t border-line-soft/60 bg-surface-white/90 px-5 py-4 backdrop-blur-md">
+        {submitError ? (
+          <p
+            role="alert"
+            className="mb-3 rounded-xl border border-danger/20 bg-danger/5 px-3 py-2 text-center text-xs font-semibold leading-relaxed text-danger"
+          >
+            {submitError}
+          </p>
+        ) : null}
+        <PrimaryButton
+          onClick={handleNext}
+          disabled={!canProceed || isSubmitting}
+          loading={isSubmitting}
         >
-          {submitError}
-        </p>
-      ) : null}
-
-      <PrimaryFooter
-        label={
-          isSubmitting
-            ? "저장 중…"
+          {isSubmitting
+            ? "AI가 생각 중…"
             : step === TOTAL_STEPS
-              ? "이 예산으로 일정 만들기"
-              : "다음"
-        }
-        onClick={() => {
-          void handleNext();
-        }}
-        disabled={!canProceed || isSubmitting}
-        loading={isSubmitting}
-        hint={proceedHint}
-      />
+              ? "완료하고 추천 받기"
+              : "다음"}
+        </PrimaryButton>
+      </footer>
     </div>
   );
 }
@@ -245,8 +235,8 @@ export default function OnboardingPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-0 flex-1 items-center justify-center bg-mu-bg">
-          <div className="h-10 w-10 animate-pulse rounded-mu-lg bg-mu-accent-soft" />
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <div className="h-10 w-10 animate-pulse rounded-2xl bg-brand/15" />
         </div>
       }
     >
