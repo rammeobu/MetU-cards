@@ -3,8 +3,6 @@
 import { Loader2 } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 
-import { SplitPreviewSheet } from "@/components/ledger/SplitPreviewSheet";
-import type { SplitPreviewPayload } from "@/components/ledger/split-preview-types";
 import {
   SPLIT_PATCH_TEXT_MAX,
   type SplitPatch,
@@ -16,7 +14,20 @@ import {
 import { formatKRW } from "@/lib/shared/format";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 
-type PreviewPayload = SplitPreviewPayload;
+type ShareRow = { memberId: string; name: string; krw: number };
+
+type PreviewPayload = {
+  expenseId: string;
+  label: string;
+  kind: string;
+  before: ShareRow[];
+  after: ShareRow[];
+  beforeDigest: string;
+  krwAmount?: number;
+  splitType?: string;
+  myBefore?: number;
+  myAfter?: number;
+};
 
 type ExpenseOption = { id: string; label: string; krwAmount: number };
 
@@ -24,6 +35,13 @@ type Props = {
   tripId: string;
   /** 적용·되돌리기 성공 후 정산/잔액을 다시 읽게 한다. */
   onChanged?: () => void | Promise<void>;
+};
+
+const KIND_LABEL: Record<string, string> = {
+  exclude: "일부 제외",
+  only: "특정 멤버만",
+  weights: "비율 조정",
+  itemExclusions: "품목별 제외",
 };
 
 function newIdempotencyKey(): string {
@@ -254,11 +272,11 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
   return (
     <section
       aria-label="분담 말로 고치기"
-      className="rounded-mu-xl border border-mu-line bg-mu-card p-4 text-mu-body"
+      className="rounded-xl bg-surface-soft p-3 text-xs"
     >
       <button
         type="button"
-        className="mu-focus flex min-h-tap w-full items-center justify-between gap-2 text-left text-mu-heading text-mu-fg"
+        className="flex min-h-[44px] w-full items-center justify-between gap-2 text-left font-bold text-ink-heading"
         aria-expanded={open}
         onClick={() => void toggleOpen()}
       >
@@ -266,25 +284,25 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
       </button>
 
       {open ? (
-        <div className="mt-3 flex flex-col gap-3 border-t border-mu-line pt-3">
-          <p className="text-mu-caption text-mu-fg-3">
+        <div className="mt-3 flex flex-col gap-2 border-t border-line-soft pt-3">
+          <p className="font-normal text-ink-muted">
             예: &ldquo;저는 술 안 마셨어요&rdquo;, &ldquo;민수는 빼고&rdquo;
           </p>
 
           {loadingList ? (
-            <p className="flex items-center gap-1 text-mu-fg-3">
+            <p className="flex items-center gap-1 text-ink-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               지출 목록을 불러오는 중…
             </p>
           ) : null}
           {listError ? (
-            <p role="alert" className="font-semibold text-mu-err">
+            <p role="alert" className="font-semibold text-danger">
               {listError}
             </p>
           ) : null}
 
           {options.length === 0 && !loadingList ? (
-            <p className="text-mu-fg-3">고칠 지출이 아직 없어요.</p>
+            <p className="text-ink-muted">고칠 지출이 아직 없어요.</p>
           ) : (
             <>
               <label
@@ -294,7 +312,7 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
                 지출 고르기
                 <select
                   id={expenseFieldId}
-                  className="min-h-tap w-full rounded-mu-md border border-mu-line bg-mu-sunken px-3 text-mu-body font-normal"
+                  className="min-h-[44px] w-full rounded-lg border border-line bg-surface-white px-3 text-sm font-normal"
                   value={expenseId}
                   disabled={Boolean(busy)}
                   onChange={(e) => {
@@ -320,7 +338,7 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
                 어떻게 바꿀까요?
                 <textarea
                   id={textFieldId}
-                  className="min-h-[88px] w-full resize-y rounded-mu-md border border-mu-line bg-mu-sunken px-3 py-2 text-mu-body font-normal"
+                  className="min-h-[88px] w-full resize-y rounded-lg border border-line bg-surface-white px-3 py-2 text-sm font-normal"
                   placeholder="저는 술 안 마셨어요"
                   value={text}
                   maxLength={SPLIT_PATCH_TEXT_MAX}
@@ -341,7 +359,7 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
                   disabled={
                     Boolean(busy) || !text.trim() || Boolean(historyId)
                   }
-                  className="mu-focus inline-flex min-h-tap items-center gap-1 rounded-mu-md bg-mu-accent px-3 text-mu-caption font-bold text-mu-on-accent disabled:opacity-40"
+                  className="inline-flex min-h-[44px] items-center gap-1 rounded-lg bg-brand px-3 text-xs font-bold text-white disabled:opacity-40"
                   onClick={() => void runPreview()}
                 >
                   {busy === "preview" ? (
@@ -353,7 +371,7 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
                   <button
                     type="button"
                     disabled={Boolean(busy)}
-                    className="mu-focus inline-flex min-h-tap items-center gap-1 rounded-mu-md border border-mu-accent px-3 text-mu-caption font-bold text-mu-accent disabled:opacity-40"
+                    className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-brand px-3 text-xs font-bold text-brand disabled:opacity-40"
                     onClick={() => void runApply()}
                   >
                     {busy === "apply" ? (
@@ -366,7 +384,7 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
                   <button
                     type="button"
                     disabled={Boolean(busy)}
-                    className="mu-focus inline-flex min-h-tap items-center gap-1 rounded-mu-md border border-mu-warn px-3 text-mu-caption font-bold text-mu-warn disabled:opacity-40"
+                    className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-amber-600 px-3 text-xs font-bold text-amber-800 disabled:opacity-40"
                     onClick={() => void runUndo()}
                   >
                     {busy === "undo" ? (
@@ -380,22 +398,65 @@ export function SplitPatchBox({ tripId, onChanged }: Props) {
           )}
 
           {clarify ? (
-            <p className="rounded-mu-md bg-mu-warn-soft px-3 py-2 font-semibold text-mu-warn">
+            <p className="rounded-lg bg-amber-50 px-2 py-2 font-semibold text-amber-900">
               {clarify}
             </p>
           ) : null}
 
           {preview ? (
-            <SplitPreviewSheet preview={preview} showActions={false} />
+            <div className="rounded-lg bg-surface-white p-3 ring-1 ring-line">
+              <p className="font-bold text-ink-heading">
+                {preview.label || "지출"}
+                {preview.kind
+                  ? ` · ${KIND_LABEL[preview.kind] ?? preview.kind}`
+                  : ""}
+              </p>
+              <p className="mt-1 text-ink-muted">
+                대상: {preview.label || "지출"}
+                {typeof preview.krwAmount === "number"
+                  ? ` · ${formatKRW(preview.krwAmount)}`
+                  : ""}
+              </p>
+              {typeof preview.myBefore === "number" &&
+              typeof preview.myAfter === "number" ? (
+                <p className="mt-1 font-semibold text-ink-heading">
+                  내 부담 {formatKRW(preview.myBefore)} →{" "}
+                  {formatKRW(preview.myAfter)}
+                </p>
+              ) : null}
+              <p className="mt-1 text-ink-muted">적용 전에 확인해 주세요</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div>
+                  <p className="font-semibold text-ink-muted">지금</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {preview.before.map((r) => (
+                      <li key={`b-${r.memberId}`}>
+                        {r.name} <span>{formatKRW(r.krw)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-semibold text-brand">바꾼 뒤</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {preview.after.map((r) => (
+                      <li key={`a-${r.memberId}`}>
+                        {r.name} <span>{formatKRW(r.krw)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
           ) : null}
 
           {doneMsg ? (
-            <p role="status" className="font-semibold text-mu-ok">
+            <p role="status" className="font-semibold text-emerald-800">
               {doneMsg}
             </p>
           ) : null}
           {error ? (
-            <p role="alert" className="font-semibold text-mu-err">
+            <p role="alert" className="font-semibold text-danger">
               {error}
             </p>
           ) : null}

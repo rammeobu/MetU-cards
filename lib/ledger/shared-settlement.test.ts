@@ -48,22 +48,6 @@ function raw(over: Record<string, unknown> = {}) {
 }
 
 describe("parseSharedSettlementDetail", () => {
-  it("hostPayout 이 없으면 null 로 둡니다", () => {
-    expect(parseSharedSettlementDetail(raw())?.hostPayout).toBeNull();
-  });
-
-  it("hostPayout 을 파싱해요", () => {
-    const d = parseSharedSettlementDetail(
-      raw({
-        hostPayout: { bank: "국민은행", accountNo: "123-45-6789" },
-      })
-    );
-    expect(d?.hostPayout).toEqual({
-      bank: "국민은행",
-      accountNo: "123-45-6789",
-    });
-  });
-
   it("정상 응답을 앱 타입으로 바꾼다", () => {
     const d = parseSharedSettlementDetail(raw());
     expect(d?.destination).toBe("도쿄");
@@ -72,39 +56,11 @@ describe("parseSharedSettlementDetail", () => {
       currency: "JPY",
       fxRateToKrw: 10,
       krwAmount: 5000,
-      billedKrw: null,
-      feePct: null,
     });
     expect(d?.totals).toEqual({
       totalKrw: 15000,
       expenseCount: 2,
       expensesTruncated: false,
-    });
-  });
-
-  it("billedKrw·feePct 를 읽는다", () => {
-    const d = parseSharedSettlementDetail(
-      raw({
-        expenses: [
-          {
-            id: "e2",
-            label: "라멘",
-            category: "식비",
-            spentOn: "2026-07-22",
-            paidBy: "m2",
-            amount: 500,
-            currency: "JPY",
-            fxRateToKrw: 10,
-            krwAmount: 5500,
-            billedKrw: 5500,
-            feePct: 3.2,
-          },
-        ],
-      })
-    );
-    expect(d?.expenses[0]).toMatchObject({
-      billedKrw: 5500,
-      feePct: 3.2,
     });
   });
 

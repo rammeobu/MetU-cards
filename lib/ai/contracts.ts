@@ -45,13 +45,13 @@ export type AiChatResponse = {
 
 // --- plan ---
 
-type PlanScheduleItemOut = {
+export type PlanScheduleItemOut = {
   time: string;
   title: string;
   detail: string;
 };
 
-type PlanDayScheduleOut = {
+export type PlanDayScheduleOut = {
   day: number;
   label: string;
   items: PlanScheduleItemOut[];
@@ -67,7 +67,7 @@ export type PlanItineraryOut = {
 
 // --- tips ---
 
-type TipItemOut = {
+export type TipItemOut = {
   emoji: string;
   title: string;
   description: string;
@@ -84,7 +84,7 @@ export type WeatherOut = {
 
 // --- deals ---
 
-type DealRowOut = {
+export type DealRowOut = {
   name: string;
   country: string;
   bestMonth: string;
@@ -95,7 +95,7 @@ type DealRowOut = {
 
 export type DealsOut = { deals: DealRowOut[] };
 
-type DealEnrichOut = {
+export type DealEnrichOut = {
   summary: string;
   whyCheap: string[];
   budgetTips: string[];
@@ -122,7 +122,7 @@ function asStringList(value: unknown, max = 20): string[] {
     .slice(0, max);
 }
 
-function parseJsonContent(content: string): unknown | null {
+export function parseJsonContent(content: string): unknown | null {
   try {
     let text = content.trim();
     if (text.startsWith("```")) {
@@ -261,14 +261,14 @@ export type ItinerarySlot =
   | "dinner"
   | "evening";
 
-type ItineraryItemOut = {
+export type ItineraryItemOut = {
   placeId: string;
   slot: ItinerarySlot;
   durationMin: number;
   reason: string;
 };
 
-type ItineraryDayOut = {
+export type ItineraryDayOut = {
   day: number;
   theme: string;
   items: ItineraryItemOut[];
@@ -326,7 +326,7 @@ export function parseItinerary(content: string): ItineraryOut | null {
   return { summary: asString(root.summary) || "", days };
 }
 
-type PatchOpKind = "replace" | "remove" | "add" | "move";
+export type PatchOpKind = "replace" | "remove" | "add" | "move";
 
 export type PatchOp = {
   op: PatchOpKind;
@@ -554,13 +554,13 @@ export type ReceiptItemOut = {
   amount: number | null;
 };
 
-type ReceiptSecondaryAmountOut = {
+export type ReceiptSecondaryAmountOut = {
   label: string;
   amount: number;
   currency: string | null;
 };
 
-type ReceiptTaxFreeOut = {
+export type ReceiptTaxFreeOut = {
   eligible: boolean | null;
   evidence: string | null;
 };
