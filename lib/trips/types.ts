@@ -10,7 +10,7 @@ export interface TripExpense {
   date: string;
 }
 
-interface TripBudgetAllocation {
+export interface TripBudgetAllocation {
   id: string;
   label: string;
   amount: number;

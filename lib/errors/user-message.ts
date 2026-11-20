@@ -7,7 +7,7 @@ export type ErrorSource =
   | "upload"
   | "unknown";
 
-type UserFacingAction =
+export type UserFacingAction =
   | "retry"
   | "login"
   | "open-guide"

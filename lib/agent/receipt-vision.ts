@@ -10,7 +10,7 @@ import {
 } from "@/lib/ledger/receipt-postprocess";
 import { redactSms } from "@/lib/ledger/sms/parse";
 
-type ReceiptVisionError =
+export type ReceiptVisionError =
   | "no_api_key"
   | "image_too_large"
   | "vision_failed"
@@ -63,7 +63,7 @@ function redactNullable(value: string | null): string | null {
 }
 
 /** 모델 출력 안의 텍스트 필드에서 민감 번호를 제거한다. 숫자 필드는 그대로. */
-function redactReceiptOut(extract: ReceiptOut): ReceiptOut {
+export function redactReceiptOut(extract: ReceiptOut): ReceiptOut {
   return {
     ...extract,
     merchant: redactNullable(extract.merchant),
@@ -92,12 +92,6 @@ export type ReceiptTripContext = {
   localCurrency?: string | null;
 };
 
-type ReceiptExifHint = {
-  takenAt?: string;
-  lat?: number;
-  lng?: number;
-};
-
 export type ExtractReceiptArgs = {
   base64: string;
   mime: string;
@@ -105,8 +99,6 @@ export type ExtractReceiptArgs = {
   tripId: string;
   hintCurrency?: string | null;
   tripContext?: ReceiptTripContext | null;
-  /** 업로드 전 EXIF. 영수증에 시각이 없을 때만 힌트. */
-  exif?: ReceiptExifHint | null;
 };
 
 function contextValue(value: string | null | undefined): string {
@@ -117,10 +109,9 @@ function contextValue(value: string | null | undefined): string {
 
 function buildReceiptUserText(
   hint: string,
-  tripContext: ReceiptTripContext | null | undefined,
-  exif?: ReceiptExifHint | null
+  tripContext: ReceiptTripContext | null | undefined
 ): string {
-  const lines = [
+  return [
     "첨부된 영수증 이미지를 스키마에 맞춰 구조화해요.",
     "<trip_context>",
     `hint_currency=${contextValue(hint)}`,
@@ -129,25 +120,7 @@ function buildReceiptUserText(
     `trip_end_date=${contextValue(tripContext?.endDate)}`,
     "locale=ko-KR",
     "</trip_context>",
-  ];
-  if (exif?.takenAt || (exif?.lat != null && exif?.lng != null)) {
-    lines.push("<exif_hint>");
-    if (exif.takenAt) {
-      lines.push(
-        `taken_at=${contextValue(exif.takenAt)}`,
-        "taken_at은 영수증에 결제 시각이 없을 때만 참고하세요."
-      );
-    }
-    if (exif.lat != null && exif.lng != null) {
-      // GPS는 소수점 2자리로 거칠게 (프라이버시)
-      lines.push(
-        `approx_lat=${(Math.round(exif.lat * 100) / 100).toFixed(2)}`,
-        `approx_lng=${(Math.round(exif.lng * 100) / 100).toFixed(2)}`
-      );
-    }
-    lines.push("</exif_hint>");
-  }
-  return lines.join("\n");
+  ].join("\n");
 }
 
 /**
@@ -167,7 +140,7 @@ export async function extractReceiptFromImage(
     userId: args.userId,
     tripId: args.tripId,
     system: buildInsightSystem("receipt_vision", RECEIPT_VISION_SYSTEM),
-    text: buildReceiptUserText(hint, args.tripContext, args.exif),
+    text: buildReceiptUserText(hint, args.tripContext),
     images: [{ mimeType: args.mime, base64: args.base64 }],
     schema: receiptSchema,
   });
@@ -193,18 +166,5 @@ export async function extractReceiptFromImage(
   }
 
   const { draft, rawExtract } = postprocessReceiptExtract(safe, hint);
-  if (
-    args.exif?.takenAt &&
-    (!draft.paidAt || draft.timeIsEstimated) &&
-    !safe.paidAt
-  ) {
-    const iso = args.exif.takenAt;
-    draft.paidAt = iso.slice(0, 16);
-    draft.spentOn = iso.slice(0, 10);
-    draft.timeIsEstimated = true;
-    draft.timeSource = "exif";
-  } else if (draft.paidAt) {
-    draft.timeSource = "receipt";
-  }
   return { ok: true, extract: rawExtract, draft };
 }

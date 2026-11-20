@@ -5,7 +5,6 @@ import { Camera, ImagePlus, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toUserFacingError } from "@/lib/errors/user-message";
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
-import { appendExifFields, readReceiptExif } from "@/lib/ledger/exif";
 import { resizeImageToJpeg } from "@/lib/ledger/image";
 import { receiptResponseToDraft } from "@/lib/ledger/receipt-client";
 import {
@@ -30,9 +29,9 @@ const ACCEPT = "image/jpeg,image/png,image/webp";
 const DONE_TEXT: Record<Done, string> = {
   saved: "영수증을 읽어서 가계부에 넣었어요.",
   merged: "이미 있는 지출에 영수증을 붙였어요.",
-  review: "영수증을 읽었어요. 확인함에서 확인해 주세요.",
+  review: "영수증을 읽었어요. 수신함에서 확인해 주세요.",
   not_receipt: "영수증이 아닌 것 같아요.",
-  failed: "영수증을 읽지 못했어요. 붙여넣기·직접 입력으로 이어서 적어 주세요.",
+  failed: "영수증을 읽지 못했어요. 다시 시도해 주세요.",
 };
 
 function sleep(ms: number): Promise<void> {
@@ -113,14 +112,12 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
   }
 
   async function uploadToInbox(file: File) {
-    const exif = await readReceiptExif(file);
     const resized = await resize(file);
     if (!resized) return;
     const fd = new FormData();
     fd.set("tripId", tripId);
     fd.set("file", resized);
     fd.set("source", "upload");
-    appendExifFields(fd, exif);
     const res = await fetch("/api/events/upload", { method: "POST", body: fd });
     if (!res.ok) {
       await failFromResponse(res);
@@ -152,7 +149,7 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
       });
       setError(
         res.status >= 500
-          ? "영수증 인식에 실패했어요. 붙여넣기·직접 입력으로 이어서 적어 주세요."
+          ? "영수증 인식에 실패했어요. 다시 시도해 주세요."
           : mapped.message
       );
       return;
@@ -192,7 +189,7 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-xl bg-mu-sunken p-3"
+      className="flex flex-col gap-2 rounded-xl bg-surface-soft p-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -200,7 +197,7 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
         if (f) void upload(f);
       }}
     >
-      <p className="text-xs font-bold text-mu-fg">영수증 사진</p>
+      <p className="text-xs font-bold text-ink-heading">영수증 사진</p>
       <input
         ref={cameraRef}
         type="file"
@@ -220,7 +217,7 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
         <button
           type="button"
           disabled={busy}
-          className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-mu-accent px-3 py-2 text-xs font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+          className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           onClick={() => cameraRef.current?.click()}
         >
           {busy ? (
@@ -233,7 +230,7 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
         <button
           type="button"
           disabled={busy}
-          className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-mu-card px-3 py-2 text-xs font-bold text-mu-fg ring-1 ring-line disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+          className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-surface-white px-3 py-2 text-xs font-bold text-ink-heading ring-1 ring-line disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           onClick={() => galleryRef.current?.click()}
         >
           <ImagePlus className="h-3.5 w-3.5" />
@@ -244,20 +241,20 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
         type="button"
         aria-pressed={instant}
         disabled={busy}
-        className="inline-flex min-h-11 items-center self-start text-[11px] font-semibold text-mu-fg-3 underline-offset-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mu-accent"
+        className="inline-flex min-h-11 items-center self-start text-[11px] font-semibold text-ink-muted underline-offset-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         onClick={() => setInstant((v) => !v)}
       >
         {instant
-          ? "확인함 없이 바로 확인하는 중이에요 (눌러서 끄기)"
-          : "확인함 없이 바로 확인할래요"}
+          ? "수신함 없이 바로 확인하는 중이에요 (눌러서 끄기)"
+          : "수신함 없이 바로 확인할래요"}
       </button>
       {phase === "uploading" ? (
-        <p role="status" className="text-xs font-semibold text-mu-fg-3">
+        <p role="status" className="text-xs font-semibold text-ink-muted">
           올리는 중이에요
         </p>
       ) : null}
       {phase === "reading" ? (
-        <p role="status" className="text-xs font-semibold text-mu-fg-3">
+        <p role="status" className="text-xs font-semibold text-ink-muted">
           읽는 중이에요
         </p>
       ) : null}
@@ -266,42 +263,42 @@ export function ReceiptUploader({ tripId, onDraft }: Props) {
           role="status"
           className={`text-xs font-semibold ${
             done === "failed" || done === "not_receipt"
-              ? "text-mu-err"
-              : "text-mu-ok"
+              ? "text-danger"
+              : "text-emerald-800"
           }`}
         >
           {DONE_TEXT[done]}{" "}
           {done === "saved" || done === "merged" ? (
             <Link
               href={`/trips/${tripId}/ledger`}
-              className="inline-flex min-h-11 items-center font-bold text-mu-accent"
+              className="inline-flex min-h-11 items-center font-bold text-brand"
             >
               가계부 보기
             </Link>
           ) : done === "review" || done === "failed" ? (
             <Link
               href={`/trips/${tripId}/ledger/inbox`}
-              className="inline-flex min-h-11 items-center font-bold text-mu-accent"
+              className="inline-flex min-h-11 items-center font-bold text-brand"
             >
-              확인함 열기
+              수신함 열기
             </Link>
           ) : null}
         </p>
       ) : null}
       {timedOut ? (
-        <p role="status" className="text-xs font-semibold text-mu-fg-3">
+        <p role="status" className="text-xs font-semibold text-ink-muted">
           아직 읽는 중이에요. 잠시 뒤{" "}
           <Link
             href={`/trips/${tripId}/ledger/inbox`}
-            className="inline-flex min-h-11 items-center font-bold text-mu-accent"
+            className="inline-flex min-h-11 items-center font-bold text-brand"
           >
-            확인함
+            수신함
           </Link>
           에서 확인해 주세요.
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className="text-xs font-semibold text-mu-err">
+        <p role="alert" className="text-xs font-semibold text-danger">
           {error}
         </p>
       ) : null}

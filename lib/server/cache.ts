@@ -2,7 +2,7 @@ import "server-only";
 
 import { getAgentAdmin } from "@/lib/agent/admin";
 
-type CacheHit = "fresh" | "stale" | "miss";
+export type CacheHit = "fresh" | "stale" | "miss";
 
 export type CacheResult<T> = {
   value: T;

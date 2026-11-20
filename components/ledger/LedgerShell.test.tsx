@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
@@ -16,26 +16,16 @@ const confirmSheet = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(search),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 vi.mock("@/lib/auth/AuthProvider", () => ({ useAuth: () => useAuth() }));
-vi.mock("@/lib/trips/TripProvider", () => ({
-  useTrips: () => ({ getTrip: () => undefined }),
-}));
 vi.mock("@/lib/ledger/supabase", () => ({
   listMembers: (...a: unknown[]) => listMembers(...a),
   listExpenses: (...a: unknown[]) => listExpenses(...a),
   listCardProfiles: (...a: unknown[]) => listCardProfiles(...a),
   ensureOwnerMember: (...a: unknown[]) => ensureOwnerMember(...a),
-  fetchLatestSettlement: vi.fn(async () => ({ ok: true, settlement: null })),
-  fetchSettlementHistory: vi.fn(async () => []),
-  listVoidedExpenseIds: vi.fn(async () => new Set()),
 }));
 vi.mock("@/lib/supabase/browser", () => ({
   getBrowserSupabase: () => getBrowserSupabase(),
-}));
-vi.mock("@/lib/ledger/open-suggestions", () => ({
-  fetchOpenBudgetSuggestions: vi.fn(async () => []),
 }));
 vi.mock("@/components/ledger/ExpenseConfirmSheet", () => ({
   ExpenseConfirmSheet: (props: { drafts: ExpenseDraftInput[] }) => {
@@ -58,12 +48,6 @@ vi.mock("@/components/ledger/VoiceInputButton", () => ({
 vi.mock("@/components/ledger/CardProfileSettings", () => ({
   CardProfileSettings: () => <button type="button">카드 수수료 추가</button>,
 }));
-vi.mock("@/components/ledger/HostPayoutSettings", () => ({
-  HostPayoutSettings: () => <button type="button">입금 계좌 저장</button>,
-}));
-vi.mock("@/components/ledger/HostTransferSettings", () => ({
-  HostTransferSettings: () => <button type="button">호스트 넘기기</button>,
-}));
 vi.mock("@/components/ledger/CashRateSettings", () => ({
   CashRateSettings: () => <button type="button">현금 환율 저장</button>,
 }));
@@ -71,7 +55,6 @@ vi.mock("@/components/trips/ledger/TripInvitePanel", () => ({
   TripInvitePanel: () => null,
 }));
 
-import { ToastProvider } from "@/components/ds/Toast";
 import { LedgerShell } from "@/components/ledger/LedgerShell";
 
 const scrollIntoView = vi.fn();
@@ -88,20 +71,11 @@ beforeEach(() => {
   ]);
   listExpenses.mockResolvedValue([]);
   listCardProfiles.mockResolvedValue([]);
-  const chain: Record<string, unknown> = {};
-  const result = { count: 0, data: null, error: null };
-  const asThenable = {
-    then: (
-      resolve: (v: typeof result) => unknown,
-      reject?: (e: unknown) => unknown
-    ) => Promise.resolve(result).then(resolve, reject),
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    in: () => Promise.resolve({ count: 0, error: null }),
   };
-  chain.select = () => chain;
-  chain.eq = () => chain;
-  chain.in = () => Object.assign(asThenable, chain);
-  chain.order = () => chain;
-  chain.limit = () => chain;
-  chain.maybeSingle = async () => result;
   getBrowserSupabase.mockReturnValue({ from: () => chain });
   Element.prototype.scrollIntoView = scrollIntoView;
 });
@@ -111,9 +85,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/** 호스트 기록 단계는 "오늘 지출", 게스트 읽기 전용은 "지출 목록" 이 보이면 로드 끝. */
 async function loaded() {
-  await screen.findByText(/^(오늘 지출|지출 목록)$/);
+  await screen.findByText("지출 목록");
 }
 
 describe("LedgerShell 바로가기 쿼리", () => {
@@ -121,7 +94,6 @@ describe("LedgerShell 바로가기 쿼리", () => {
     render(<LedgerShell tripId="t1" />);
     await loaded();
     expect(screen.queryByTestId("confirm-sheet")).toBeNull();
-    expect(screen.queryByRole("dialog", { name: "지출 추가" })).toBeNull();
     expect(scrollIntoView).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(document.body);
   });
@@ -142,66 +114,32 @@ describe("LedgerShell 바로가기 쿼리", () => {
     });
   });
 
-  // U2: 스크롤 대신 지출 추가 시트를 해당 탭으로 열고 첫 버튼에 포커스만 줘요.
-  it("?add=receipt 는 지출 추가 시트를 영수증 탭으로 열고 첫 버튼에 포커스만 줘요", async () => {
+  it("?add=receipt 는 영수증 섹션으로 스크롤하고 첫 버튼에 포커스만 줘요", async () => {
     search = "add=receipt";
     render(<LedgerShell tripId="t1" />);
-    const dialog = await screen.findByRole("dialog", { name: "지출 추가" });
-    expect(dialog).toBeTruthy();
-    expect(
-      screen.getByRole("tab", { name: "영수증" }).getAttribute("aria-selected")
-    ).toBe("true");
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByText("영수증 촬영하기"))
     );
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("confirm-sheet")).toBeNull();
   });
 
-  it("?add=voice 는 지출 추가 시트를 음성 탭으로 열어요", async () => {
+  it("?add=voice 는 음성 섹션으로 이동해요", async () => {
     search = "add=voice";
     render(<LedgerShell tripId="t1" />);
-    await screen.findByRole("dialog", { name: "지출 추가" });
-    expect(
-      screen.getByRole("tab", { name: "음성" }).getAttribute("aria-selected")
-    ).toBe("true");
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByText("음성 입력"))
     );
     expect(screen.queryByTestId("confirm-sheet")).toBeNull();
   });
 
-  it("?add=cash 는 현금 인출 시트를 열어요", async () => {
-    search = "add=cash";
-    render(<LedgerShell tripId="t1" />);
-    expect(
-      await screen.findByRole("dialog", { name: "현금 인출·환전" })
-    ).toBeTruthy();
-    expect(screen.queryByTestId("confirm-sheet")).toBeNull();
-  });
-
-  it("?settings=fx 는 설정 시트를 열어요", async () => {
+  it("?settings=fx 는 환율·수수료 설정으로 이동해요", async () => {
     search = "settings=fx";
     render(<LedgerShell tripId="t1" />);
     await waitFor(() =>
-      expect(screen.getByText("카드 수수료 추가")).toBeTruthy()
+      expect(document.activeElement).toBe(screen.getByText("카드 수수료 추가"))
     );
-    expect(screen.getByRole("dialog", { name: "설정" })).toBeTruthy();
-  });
-
-  it("저장하면 목록을 다시 불러오고 「지출을 저장했어요」 토스트를 띄워요", async () => {
-    search = "add=manual";
-    render(
-      <ToastProvider>
-        <LedgerShell tripId="t1" />
-      </ToastProvider>
-    );
-    await screen.findByTestId("confirm-sheet");
-    const props = confirmSheet.mock.calls.at(-1)![0] as { onSaved: () => void };
-    const before = listExpenses.mock.calls.length;
-    act(() => props.onSaved());
-    expect(await screen.findByText("지출을 저장했어요")).toBeTruthy();
-    await waitFor(() => expect(listExpenses.mock.calls.length).toBe(before + 1));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it("알 수 없는 값은 무시해요", async () => {
@@ -214,21 +152,12 @@ describe("LedgerShell 바로가기 쿼리", () => {
 });
 
 describe("LedgerShell 익명 게스트 읽기 전용", () => {
-  it("직접 입력·업로더·설정이 없고 제안 슬롯만 보여요", async () => {
+  it("직접 입력·업로더·설정이 없고 안내 슬롯만 보여요", async () => {
     useAuth.mockReturnValue({
       user: { id: "anon", user_metadata: {}, is_anonymous: true },
       provider: "supabase",
       isAnonymous: true,
     });
-    listMembers.mockResolvedValue([
-      {
-        id: "m1",
-        tripId: "t1",
-        displayName: "민수",
-        isOwner: false,
-        userId: "anon",
-      },
-    ]);
     render(<LedgerShell tripId="t1" />);
     await loaded();
     expect(screen.queryByRole("button", { name: "직접 입력" })).toBeNull();
@@ -237,7 +166,9 @@ describe("LedgerShell 익명 게스트 읽기 전용", () => {
     expect(screen.queryByText("붙여넣기 분석")).toBeNull();
     expect(screen.queryByText("카드 수수료 추가")).toBeNull();
     expect(screen.getByText("내가 낸 지출")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "내가 냈어요" })).toBeTruthy();
+    expect(
+      screen.getByText(/호스트가 승인하면 정산에 들어가요/)
+    ).toBeTruthy();
   });
 
   it("익명이면 ?add=manual 바로가기도 열지 않아요", async () => {

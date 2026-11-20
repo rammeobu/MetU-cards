@@ -1,4 +1,4 @@
-import { LedgerInboxClient } from "@/components/ledger/LedgerInboxClient";
+import { AgentInbox } from "@/components/agent/AgentInbox";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -6,5 +6,5 @@ interface Props {
 
 export default async function LedgerInboxPage({ params }: Props) {
   const { id } = await params;
-  return <LedgerInboxClient tripId={id} />;
+  return <AgentInbox tripId={id} />;
 }

@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => "/agent",
 }));
 
-vi.mock("@/lib/ledger/use-unassigned-inbox-count", () => ({
-  useUnassignedInboxCount: () => 0,
+vi.mock("@/lib/community/CommunityProvider", () => ({
+  useCommunityState: () => ({ posts: [] }),
+  useCommunityActions: () => ({
+    isPartyHost: () => false,
+    isPartyJoined: () => false,
+  }),
+}));
+
+vi.mock("@/lib/community/useChatRoomSummaries", () => ({
+  useChatRoomSummaries: () => ({ unreadCountByPostId: { p1: 3 } }),
 }));
 
 import { BottomNav } from "@/components/ui/BottomNav";
@@ -16,37 +24,25 @@ import { BottomNav } from "@/components/ui/BottomNav";
 afterEach(() => cleanup());
 
 describe("BottomNav", () => {
-  beforeEach(() => {
-    cleanup();
+  it("uses 가계부 label and not Agent", () => {
+    render(<BottomNav />);
+    expect(screen.getByText("가계부")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Agent");
   });
 
-  it("하단은 여행·홈·확인함 3탭이에요", () => {
+  it("sets aria-current on active item", () => {
     render(<BottomNav />);
-    expect(screen.getByText("여행")).toBeTruthy();
-    expect(screen.getByText("홈")).toBeTruthy();
-    expect(screen.getByText("확인함")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("내 정보");
-    expect(document.body.textContent).not.toContain("가계부");
-    expect(document.body.textContent).not.toContain("멧톡");
+    const agent = screen.getByText("가계부").closest("a");
+    expect(agent?.getAttribute("aria-current")).toBe("page");
   });
 
-  it("홈 경로에서 aria-current 를 켜요", () => {
+  it("includes badge count in aria-label", () => {
+    // Force unread via mock — opod path
     render(<BottomNav />);
-    const home = screen.getByText("홈").closest("a");
-    expect(home?.getAttribute("href")).toBe("/");
-    expect(home?.getAttribute("aria-current")).toBe("page");
-  });
-
-  it("탭 링크는 여행·홈·확인함이에요", () => {
-    render(<BottomNav />);
-    expect(screen.getByText("홈").closest("a")?.getAttribute("href")).toBe(
-      "/"
-    );
-    expect(screen.getByText("여행").closest("a")?.getAttribute("href")).toBe(
-      "/trips"
-    );
-    expect(screen.getByText("확인함").closest("a")?.getAttribute("href")).toBe(
-      "/agent/inbox"
-    );
+    // With empty posts, unread is 0 from reduce of empty map — mock returns {p1:3}
+    // but chatRoomPostIds is empty so summaries may still be called with [].
+    // Override: unreadCountByPostId is always returned regardless of ids.
+    const opod = screen.getByText("멧톡").closest("a");
+    expect(opod?.getAttribute("aria-label")).toBe("멧톡, 새 메시지 3개");
   });
 });
