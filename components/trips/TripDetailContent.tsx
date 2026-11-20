@@ -1,11 +1,18 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import {
+  buildScheduleRebalancePreview,
+  type ScheduleRebalancePreview,
+} from "@/lib/budget/trip-rebalance-preview";
+import { scrollIntoScrollParent } from "@/lib/dom/scroll-into-parent";
 import { useLedger } from "@/lib/ledger/useLedger";
+import { formatKRW } from "@/lib/shared/format";
 import { useTrips } from "@/lib/trips/TripProvider";
 import { useRouter } from "next/navigation";
 import { Check, MapPin, Plus, Share2, Trash2, Users } from "lucide-react";
+import { useOptionalToast } from "@/components/ds/Toast";
 import { MobileShell } from "@/components/layout/MobileShell";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { TripBotSheet } from "@/components/trips/TripBotSheet";
@@ -19,6 +26,7 @@ import { TripDetailHero } from "@/components/trips/detail/TripDetailHero";
 import { TripDetailMemoSection } from "@/components/trips/detail/TripDetailMemoSection";
 import { TripDetailScheduleSection } from "@/components/trips/detail/TripDetailScheduleSection";
 import { TripDetailTipsSection } from "@/components/trips/detail/TripDetailTipsSection";
+import { ScheduleRebalancePreviewSheet } from "@/components/trips/detail/ScheduleRebalancePreviewSheet";
 import { TripSummaryPanel } from "@/components/trips/detail/TripSummaryPanel";
 import { useTripDetailEditor } from "@/components/trips/useTripDetailEditor";
 import type { MapPoint } from "@/lib/map/trip-points";
@@ -54,8 +62,12 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
   const router = useRouter();
   const { user, provider } = useAuth();
   const { updateTrip } = useTrips();
+  const toast = useOptionalToast();
   const isGuest = !user || provider === "guest";
   const [detailTab, setDetailTab] = useState<DetailTab>("summary");
+  const [rebalancePreview, setRebalancePreview] =
+    useState<ScheduleRebalancePreview | null>(null);
+  const [rebalanceSheetOpen, setRebalanceSheetOpen] = useState(false);
   const {
     trip,
     isReady,
@@ -110,6 +122,8 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
   const [intentOpen, setIntentOpen] = useState(false);
   const [botOpen, setBotOpen] = useState(false);
   const scheduleItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scheduleSectionRef = useRef<HTMLDivElement | null>(null);
+  const [scheduleScrollNonce, setScheduleScrollNonce] = useState(0);
 
   const handleTripIntent = useCallback(
     (intent: TripIntent) => {
@@ -141,6 +155,84 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
     const el = scheduleItemRefs.current[point.key];
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     window.setTimeout(() => setMapHighlightKey(undefined), 1800);
+  }, []);
+
+  const goToScheduleTab = useCallback(() => {
+    setDetailTab("schedule");
+    // 이미 일정 탭이어도 스크롤을 다시 트리거해요
+    setScheduleScrollNonce((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (detailTab !== "schedule" || scheduleScrollNonce === 0) return;
+    let cancelled = false;
+    let tries = 0;
+    const tick = () => {
+      if (cancelled) return;
+      const el = scheduleSectionRef.current;
+      // 시트 닫힘·일정 마운트 전에 스크롤하면 빈 자리/예산으로 돌아가요
+      if (!el || el.getBoundingClientRect().height < 48) {
+        tries += 1;
+        if (tries < 30) window.setTimeout(tick, 40);
+        return;
+      }
+      scrollIntoScrollParent(el, { offsetPx: 12, behavior: "smooth" });
+    };
+    // Sheet 포커스 복귀 다음에 실행
+    const t = window.setTimeout(tick, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [detailTab, scheduleScrollNonce]);
+
+  const handleReviewSchedule = useCallback(() => {
+    if (!trip) {
+      goToScheduleTab();
+      return;
+    }
+    if (!canEdit) {
+      goToScheduleTab();
+      return;
+    }
+    const schedule = trip.dailySchedule ?? [];
+    if (schedule.length === 0) {
+      goToScheduleTab();
+      return;
+    }
+    const preview = buildScheduleRebalancePreview({
+      budget: trip.budget,
+      spent: trip.spent,
+      schedule,
+    });
+    if (!preview.needsApply) {
+      goToScheduleTab();
+      return;
+    }
+    setRebalancePreview(preview);
+    setRebalanceSheetOpen(true);
+  }, [trip, canEdit, goToScheduleTab]);
+
+  const handleApplyRebalance = useCallback(() => {
+    if (!rebalancePreview) return;
+    const saved = rebalancePreview.result.savedAmount;
+    const next = rebalancePreview.nextSchedule;
+    setRebalanceSheetOpen(false);
+    setRebalancePreview(null);
+    updateTripSchedule(next);
+    // 시트 unmount·포커스 복귀 이후 탭 이동·스크롤
+    window.setTimeout(() => {
+      goToScheduleTab();
+      toast?.show({
+        text: `일정을 ${formatKRW(saved)} 줄였어요`,
+        tone: "ok",
+      });
+    }, 50);
+  }, [rebalancePreview, updateTripSchedule, goToScheduleTab, toast]);
+
+  const handleCloseRebalanceSheet = useCallback(() => {
+    setRebalanceSheetOpen(false);
+    setRebalancePreview(null);
   }, []);
 
   const shareButton = (
@@ -231,7 +323,7 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
           onOpenEdit={openBudgetEdit}
           onCancel={() => setEditSection(null)}
           onSave={saveBudget}
-          onReviewSchedule={() => setDetailTab("schedule")}
+          onReviewSchedule={handleReviewSchedule}
         />
 
         <div
@@ -286,6 +378,7 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
           />
         ) : null}
 
+        <div ref={scheduleSectionRef}>
         <TripDetailScheduleSection
           trip={trip}
           canEdit={canEdit}
@@ -311,6 +404,7 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
           addDraftItem={addDraftItem}
           saveDayEdit={saveDayEdit}
         />
+        </div>
 
         {styleLabels.length > 0 ? (
           <section className="flex flex-col gap-3">
@@ -355,6 +449,13 @@ export function TripDetailContent({ tripId }: TripDetailContentProps) {
           </button>
         ) : null}
       </div>
+
+      <ScheduleRebalancePreviewSheet
+        open={rebalanceSheetOpen}
+        preview={rebalancePreview}
+        onClose={handleCloseRebalanceSheet}
+        onApply={handleApplyRebalance}
+      />
 
       {canEdit && !isGuest ? (
         <>

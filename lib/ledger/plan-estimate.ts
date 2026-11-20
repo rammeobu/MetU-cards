@@ -31,6 +31,8 @@ export type BudgetView = {
   remainingLimitKrw: number;
   overLimit: boolean;
   overPlan: boolean;
+  /** 일정 예상 > 남은 한도 → 「일정 확인하기」 대상 */
+  planExceedsRemaining: boolean;
 };
 
 export function deriveBudgetView(args: {
@@ -41,23 +43,35 @@ export function deriveBudgetView(args: {
   const limitKrw = Math.max(0, Math.trunc(args.budget));
   const actualKrw = Math.max(0, Math.trunc(args.spent));
   const planKrw = args.planKrw;
+  const remainingLimitKrw = limitKrw - actualKrw;
   return {
     limitKrw,
     actualKrw,
     planKrw,
-    remainingLimitKrw: limitKrw - actualKrw,
+    remainingLimitKrw,
     overLimit: actualKrw > limitKrw && limitKrw > 0,
     overPlan: planKrw != null && actualKrw > planKrw,
+    planExceedsRemaining:
+      planKrw != null && planKrw > Math.max(0, remainingLimitKrw),
   };
 }
 
-/** 초과 시 UI 문구 — 암묵 일정 변경 금지, 확인함과 같은 언어. */
+/** 초과 시 UI 문구 — 일정 CTA는 planExceedsRemaining 일 때만. */
 export function budgetOverageCopy(view: BudgetView): string | null {
+  if (view.planExceedsRemaining) {
+    if (view.overLimit) {
+      return "예산 한도를 넘었어요. 일정을 줄일지 확인이 필요해요.";
+    }
+    return "남은 한도에 비해 일정 예상이 커요. 일정을 줄일지 확인이 필요해요.";
+  }
   if (view.overLimit) {
-    return "예산 한도를 넘었어요. 일정을 줄일지 확인이 필요해요.";
+    return "예산 한도를 넘었어요. 일정 예상은 남은 한도에 맞춰 두었어요.";
   }
-  if (view.overPlan) {
-    return "플랜 예상보다 실제 지출이 커요. 일정을 조정할지 확인이 필요해요.";
-  }
+  // overPlan 단독(일정은 남은 한도에 맞음)은 배너·CTA 없음
   return null;
+}
+
+/** 「일정 확인하기」 버튼 노출 — 남은 한도보다 일정 예상이 클 때만 */
+export function budgetNeedsScheduleReview(view: BudgetView): boolean {
+  return view.planExceedsRemaining;
 }

@@ -10,6 +10,7 @@ import {
 } from "@/lib/ledger/proposals-client";
 import type { ProposalRow } from "@/lib/ledger/proposals";
 import type { TripMember } from "@/lib/ledger/types";
+import { todayIsoDate } from "@/lib/shared/dates";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 
 type Props = {
@@ -29,14 +30,16 @@ type DraftFields = {
   note: string;
 };
 
-const EMPTY: DraftFields = {
-  label: "",
-  amount: "",
-  currency: "KRW",
-  category: "기타",
-  spentOn: new Date().toISOString().slice(0, 10),
-  note: "",
-};
+function emptyFields(currency = "KRW"): DraftFields {
+  return {
+    label: "",
+    amount: "",
+    currency,
+    category: "기타",
+    spentOn: todayIsoDate(),
+    note: "",
+  };
+}
 
 export function GuestExpenseEntry({
   tripId,
@@ -45,10 +48,9 @@ export function GuestExpenseEntry({
   defaultCurrency = "KRW",
 }: Props) {
   const [open, setOpen] = useState(false);
-  const [fields, setFields] = useState<DraftFields>({
-    ...EMPTY,
-    currency: defaultCurrency.toUpperCase(),
-  });
+  const [fields, setFields] = useState<DraftFields>(() =>
+    emptyFields(defaultCurrency.toUpperCase())
+  );
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [aiFilled, setAiFilled] = useState(false);
   const [usedReceipt, setUsedReceipt] = useState(false);
@@ -151,7 +153,7 @@ export function GuestExpenseEntry({
       return;
     }
     setOpen(false);
-    setFields({ ...EMPTY, currency: defaultCurrency.toUpperCase() });
+    setFields(emptyFields(defaultCurrency.toUpperCase()));
     setTouched({});
     setAiFilled(false);
     setUsedReceipt(false);
