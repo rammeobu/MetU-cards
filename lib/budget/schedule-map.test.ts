@@ -5,6 +5,7 @@ import {
   previewDiscretionaryGap,
   scheduleToRebalanceItems,
 } from "@/lib/budget/schedule-map";
+import type { TripDaySchedule } from "@/lib/trips/types";
 
 const sample: DaySchedule[] = [
   {
@@ -18,6 +19,18 @@ const sample: DaySchedule[] = [
   },
 ];
 
+const tripSample: TripDaySchedule[] = [
+  {
+    day: 1,
+    label: "Day 1",
+    dayTotal: 80_000,
+    items: [
+      { time: "12:00", title: "오사카 라멘", cost: 50_000 },
+      { time: "15:00", title: "도톤보리", cost: 30_000 },
+    ],
+  },
+];
+
 describe("scheduleToRebalanceItems", () => {
   it("식비·고정 스팟을 구분해요", () => {
     const items = scheduleToRebalanceItems(sample);
@@ -26,6 +39,14 @@ describe("scheduleToRebalanceItems", () => {
     expect(items[0]?.isFixed).toBe(false);
     expect(items[1]?.isFixed).toBe(true);
   });
+
+  it("Trip 일정은 kind 없이도 제목으로 분류해요", () => {
+    const items = scheduleToRebalanceItems(tripSample);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.category).toBe("meal");
+    expect(items[0]?.isFixed).toBe(false);
+    expect(items[1]?.isFixed).toBe(false);
+  });
 });
 
 describe("applyRebalanceCostsToSchedule", () => {
@@ -33,6 +54,14 @@ describe("applyRebalanceCostsToSchedule", () => {
     const items = scheduleToRebalanceItems(sample);
     items[0]!.costKRW = 40_000;
     const next = applyRebalanceCostsToSchedule(sample, items);
+    expect(next[0]?.items[0]?.cost).toBe(40_000);
+    expect(next[0]?.dayTotal).toBe(70_000);
+  });
+
+  it("Trip 일정도 dayTotal을 다시 계산해요", () => {
+    const items = scheduleToRebalanceItems(tripSample);
+    items[0]!.costKRW = 40_000;
+    const next = applyRebalanceCostsToSchedule(tripSample, items);
     expect(next[0]?.items[0]?.cost).toBe(40_000);
     expect(next[0]?.dayTotal).toBe(70_000);
   });

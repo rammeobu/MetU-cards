@@ -5,6 +5,7 @@ import { Button } from "@/components/ds/Button";
 import { Sheet } from "@/components/ds/Sheet";
 import type { ExpenseDraftInput } from "@/lib/ledger/draft";
 import { useCurrencyOptions } from "@/lib/fx/currency-list";
+import { todayIsoDate } from "@/lib/shared/dates";
 
 type Props = {
   open: boolean;
@@ -42,7 +43,7 @@ export function CashWithdrawSheet({ open, onClose, onDraft }: Props) {
       currency,
       category: "기타",
       paymentMethod: "cash",
-      spentOn: new Date().toISOString().slice(0, 10),
+      spentOn: todayIsoDate(),
       kind: "approval",
     });
     setAmount("");

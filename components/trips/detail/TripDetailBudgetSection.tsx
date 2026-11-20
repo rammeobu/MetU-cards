@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { BudgetDonutChart } from "@/components/recommend/BudgetDonutChart";
 import { TripIconButton } from "@/components/trips/TripDetailParts";
 import {
+  budgetNeedsScheduleReview,
   budgetOverageCopy,
   deriveBudgetView,
   planEstimateKrw,
@@ -23,7 +24,7 @@ type Props = {
   onOpenEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
-  /** 초과 시 일정 탭으로 (암묵 변경 없음) */
+  /** 초과 시 남은 한도 리밸런스 미리보기 → 확인 후 일정 반영 */
   onReviewSchedule?: () => void;
 };
 
@@ -51,6 +52,8 @@ export function TripDetailBudgetSection({
     [trip.budget, trip.spent, planKrw]
   );
   const overage = budgetOverageCopy(view);
+  const showScheduleCta =
+    Boolean(onReviewSchedule) && budgetNeedsScheduleReview(view);
 
   return (
     <section className="rounded-mu-xl border border-mu-line bg-mu-card p-5">
@@ -152,7 +155,7 @@ export function TripDetailBudgetSection({
                 className="mt-3 rounded-mu-md border border-mu-warn/30 bg-mu-warn-soft px-3 py-3 text-mu-caption font-semibold text-mu-warn"
               >
                 <p>{overage}</p>
-                {onReviewSchedule ? (
+                {showScheduleCta ? (
                   <button
                     type="button"
                     className="mu-focus mt-2 min-h-tap font-bold text-mu-accent underline"

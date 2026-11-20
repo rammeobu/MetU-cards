@@ -10,6 +10,7 @@ import {
 } from "@/lib/ledger/stats";
 import type { LedgerExpenseRow, TripMember } from "@/lib/ledger/types";
 import { MU_COLORS, cn } from "@/lib/design/tokens";
+import { todayIsoDate } from "@/lib/shared/dates";
 import { formatKRW } from "@/lib/shared/format";
 
 /** 차트 시리즈 — hex 리터럴 금지(래칫). 토큰 값만 참조. */
@@ -52,7 +53,7 @@ export function LedgerDashboard({
   embedded = false,
 }: Props) {
   const [scope, setScope] = useState<"all" | "today">("all");
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIsoDate();
 
   const filtered = useMemo(
     () =>

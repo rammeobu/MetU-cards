@@ -28,6 +28,7 @@ import {
 } from "@/lib/ledger/plan-match";
 import { deriveTodayBudget } from "@/lib/ledger/today-budget";
 import type { LedgerExpenseRow, TripMember } from "@/lib/ledger/types";
+import { todayIsoDate } from "@/lib/shared/dates";
 import { formatKRW } from "@/lib/shared/format";
 import { cn } from "@/lib/design/tokens";
 
@@ -87,14 +88,6 @@ const QUICK_ACTIONS: Array<{
   { tab: "voice", label: "음성", icon: Mic },
 ];
 
-function todayIsoLocal(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /** 호스트 ③ 기록 단계: Today 히어로 · 에이전트 1건 · 오늘 지출. */
 export function RecordStep({
   tripId,
@@ -114,7 +107,7 @@ export function RecordStep({
   tripBudgetKrw = 0,
   tripDays = 1,
 }: Props) {
-  const today = todayIsoLocal();
+  const today = todayIsoDate();
   const todayView = deriveTodayBudget({
     totalBudgetKrw: tripBudgetKrw,
     tripDays,

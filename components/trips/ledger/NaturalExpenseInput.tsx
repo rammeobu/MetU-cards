@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { ExpenseParseItemOut } from "@/lib/ai/contracts";
 import type { TripMember } from "@/lib/ledger/types";
+import { todayIsoDate } from "@/lib/shared/dates";
 import { ExpenseForm, type ExpenseDraft } from "@/components/trips/ledger/ExpenseForm";
 
 interface NaturalExpenseInputProps {
@@ -79,7 +80,7 @@ export function NaturalExpenseInput({
           places: places.map((p) => ({ id: p.id, title: p.title })),
           defaultCurrency,
           meId,
-          today: new Date().toISOString().slice(0, 10),
+          today: todayIsoDate(),
         }),
       });
       const data = (await res.json()) as {

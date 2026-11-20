@@ -51,7 +51,8 @@ export function Sheet({
     return () => {
       window.clearTimeout(t);
       document.body.style.overflow = prevOverflow;
-      returnEl?.focus();
+      // 포커스 복귀가 스크롤을 가로채면 시트 이후 이동(일정 탭 등)이 깨져요
+      returnEl?.focus({ preventScroll: true });
     };
   }, [open, returnFocusRef]);
 
