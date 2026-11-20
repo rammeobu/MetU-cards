@@ -32,22 +32,11 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/share-target")).toBe(true);
   });
 
-  it("allows join invite links without login", () => {
-    expect(isPublicPath("/join/abc")).toBe(true);
-    expect(isPublicPath("/join/")).toBe(true);
-  });
-
-  it("allows onboarding form and result demo without login", () => {
-    expect(isPublicPath("/onboarding")).toBe(true);
-    expect(isPublicPath("/onboarding/result")).toBe(true);
-    expect(isPublicPath("/onboarding/automation")).toBe(false);
-    expect(isPublicPath("/onboarding/shortcut-guide")).toBe(false);
-  });
-
-  it("does not treat trips or agent as public", () => {
+  it("does not treat trips, agent or join as public", () => {
     expect(isPublicPath("/trips")).toBe(false);
     expect(isPublicPath("/trips/123")).toBe(false);
     expect(isPublicPath("/agent")).toBe(false);
+    expect(isPublicPath("/join/abc")).toBe(false);
     expect(isPublicPath("/sx")).toBe(false);
   });
 });
@@ -66,13 +55,10 @@ describe("isPublicPagePath (AuthGate)", () => {
     }
   });
 
-  it("opens join invite pages without login", () => {
-    expect(isPublicPagePath("/join/abc")).toBe(true);
-  });
-
-  it("keeps trips gated", () => {
+  it("keeps trips and join gated", () => {
     expect(isPublicPagePath("/trips")).toBe(false);
     expect(isPublicPagePath("/trips/123")).toBe(false);
+    expect(isPublicPagePath("/join/abc")).toBe(false);
   });
 
   it("does not open static assets or share-target as pages", () => {

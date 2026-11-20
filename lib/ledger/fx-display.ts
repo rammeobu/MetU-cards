@@ -66,7 +66,7 @@ function parseMonthDay(date: string | null | undefined): {
   return { month, day };
 }
 
-function fxSourceLabel(
+export function fxSourceLabel(
   source: FxSource | undefined,
   isFallback: boolean
 ): string {

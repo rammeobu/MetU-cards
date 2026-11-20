@@ -1,5 +1,5 @@
-const SHARE_INBOX_CACHE = "share-inbox-v1";
-const SHARE_TTL_MS = 10 * 60 * 1000;
+export const SHARE_INBOX_CACHE = "share-inbox-v1";
+export const SHARE_TTL_MS = 10 * 60 * 1000;
 export const SHARE_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export type ShareInboxMeta = {
@@ -13,11 +13,11 @@ export type ShareInboxMeta = {
   createdAt: number;
 };
 
-function shareMetaCacheUrl(id: string): string {
+export function shareMetaCacheUrl(id: string): string {
   return `/__share/${id}/meta.json`;
 }
 
-function shareFileCacheUrl(id: string): string {
+export function shareFileCacheUrl(id: string): string {
   return `/__share/${id}/file-0`;
 }
 

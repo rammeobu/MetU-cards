@@ -5,7 +5,7 @@
 
 export type TripPhase = "ongoing" | "ended";
 
-type SettlementAction =
+export type SettlementAction =
   | "none"
   | "notify_preview_only"
   | "create_proposal"
